@@ -92,7 +92,7 @@ def main(args):
         loss = None
         return_metrics = dict()
         outputs = translate_step(model["student"], x)
-        outputs.pop("encoder_hidden_states")
+        # outputs.pop("encoder_hidden_states")
 
         loss = outputs.loss
         return_metrics["translate_loss"] = loss.item()
@@ -100,7 +100,7 @@ def main(args):
             mask = x["labels"] != -100
             teacher_outputs = teacher_forward(model["teacher"], x, tokenizer.pad_token_id,
                                               decoder_start_token_id=model["student"].config.decoder_start_token_id)
-            teacher_outputs.pop("past_key_values")
+            # teacher_outputs.pop("past_key_values")
         if STEPS[1] in args.steps or STEPS[3] in args.steps:
             distill_outputs = distill_enc_step(model["ffn"], teacher_outputs, outputs, x["attention_mask"], int(args.w_enc))
             loss += distill_outputs.pop("loss").to(loss.device)
