@@ -1,6 +1,7 @@
 import os
 from logging import getLogger
 import shutil
+from attr import dataclass
 
 import torch
 

@@ -1,5 +1,5 @@
 
-CUDA_VISIBLE_DEVICES="6"  python3 ./train.py \
+CUDA_VISIBLE_DEVICES="2"  python3 ./train.py \
     --src_lang nl_XX \
     --tgt_lang zh_CN \
     --bi false  \
@@ -24,6 +24,6 @@ CUDA_VISIBLE_DEVICES="6"  python3 ./train.py \
     --optimer adamw \
     --metrics 'bleu,'\
     --data_dir /data/hyxu/lowMT_compute/data/public_data/train/pair \
-    --name 'ft'     \
+    --name 'ft-label-smooth'     \
 # nohup ./train.sh > ./log/train.log 2>&1 &
 # bsub -n 1 -q HPC.S1.GPU.X795.suda -o ./log/train_mbart50.log -gpu  num=1:mode=exclusive_process sh ./src/nmt_train.sh
