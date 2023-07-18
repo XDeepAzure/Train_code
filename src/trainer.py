@@ -13,6 +13,8 @@ from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast as autocast
 from torch.cuda.amp import GradScaler
 
+import torch.nn as nn
+
 from src.model import PureFFN
 from transformers.models.m2m_100.modeling_m2m_100 import M2M100Encoder, M2M100Model, shift_tokens_right
 
@@ -69,7 +71,7 @@ def translate_step(model, x):
     """ 翻译任务的步骤，包含 encoder_last_hidden_state,  decoder_hidden_states(12层)"""
     for k, v in x.items():
         x[k] = v.to(model.device)
-    return model(**x, output_hidden_states=True)
+    return model(**x, output_hidden_states=False)
 
 def teacher_forward(model, x, pad_token_id, decoder_start_token_id):
     """返回teacher的forward结果 包含encoder_last_hidden_state, last_hidden_state"""
@@ -285,8 +287,8 @@ class Trainer(object):
 
     def save_checkpoint(self, path):
         # for k, v in self.model.items():
-        self.model["student"].save_pretrained(f"{path}/student_model")
-        self.tokenizer.save_pretrained(f"{path}/student_model")
+        self.model["model"].save_pretrained(f"{path}/model")
+        self.tokenizer.save_pretrained(f"{path}/model")
         # self.ffn.save_pretrained(f"{path}/ffn_model")
         pass
     
@@ -316,8 +318,9 @@ class Trainer(object):
         self.data_loader = dict()
         shuffle = self.shuffle
         for k, v in self.datasets.items():
-            self.data_loader[k] = self._create_dataloader(v, self.batch_size, shuffle)
-            logger.info(f"step {k} create dataloader on {v}")
+            if not isinstance(v, dict):
+                self.data_loader[k] = self._create_dataloader(v, self.batch_size, shuffle)
+                logger.info(f"step {k} create dataloader on {v}")
 
         # return None
 
@@ -381,11 +384,11 @@ class Trainer(object):
                     self.log_metric(metrics=metrics,step=self.update_step)
                 # eval step
                 if self.update_step % self.eval_step == 0:
-                    metrics = evaluate_step_fn(self.model["student"], self.tokenizer,
-                                          self.datasets.get("test", None), self.batch_size*2,
+                    metrics = evaluate_step_fn(self.model, self.tokenizer,
+                                          self.datasets.get("dev", None), self.batch_size,
                                           self.num_beams, self.max_length, self.metrics,
-                                          split="test", output_dir=self.saved_dir)
-                    metrics["tag"] = "test"
+                                          split="dev", output_dir=self.saved_dir)
+                    metrics["tag"] = "dev"
                     self.log_metric(metrics=metrics, step=self.update_step)
                     for v in self.model.values():
                             v.train()                  
@@ -416,7 +419,7 @@ class Trainer(object):
 
         if self.train_strategy == STRATEGY[1]:
             self.max_step = each_epoch_num_uptate* self.num_epoch
-            assert self.eval_strategy == self.train_strategy and self.eval_step < 5
+        if self.eval_strategy == STRATEGY[1]:
             self.eval_step = self.eval_step * each_epoch_num_uptate
             self.save_step = self.save_step * each_epoch_num_uptate
         self.update_step = 0
@@ -439,6 +442,89 @@ class Trainer(object):
             assert 1 == 2, "暂时为实现不适用混合精度的"
             pass
         pass
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+        """
+        How the loss is computed by Trainer. By default, all models return the loss in the first element.
+
+        Subclass and override for custom behavior.
+        """
+        if self.label_smoother is not None and "labels" in inputs:
+            labels = inputs.pop("labels")
+        else:
+            labels = None
+        outputs = model(**inputs)
+        # Save past state if it exists
+        # TODO: this needs to be fixed and made cleaner later.
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        if labels is not None:
+            if unwrap_model(model)._get_name() in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+                loss = self.label_smoother(outputs, labels, shift_labels=True)
+            else:
+                loss = self.label_smoother(outputs, labels)
+        else:
+            if isinstance(outputs, dict) and "loss" not in outputs:
+                raise ValueError(
+                    "The model did not return a loss from the inputs, only the following keys: "
+                    f"{','.join(outputs.keys())}. For reference, the inputs it received are {','.join(inputs.keys())}."
+                )
+            # We don't use .loss here since the model may return tuples instead of ModelOutput.
+            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+
+        return (loss, outputs) if return_outputs else loss
+
+
+
+"""sdgfadsgsedrgfws"""
+# Label smoothing
+        # if self.args.label_smoothing_factor != 0:
+        #     self.label_smoother = LabelSmoother(epsilon=self.args.label_smoothing_factor)
+        # else:
+        #     self.label_smoother = None
+
+# @dataclass
+class LabelSmoother:
+    """
+    Adds label-smoothing on a pre-computed output from a Transformers model.
+
+    Args:
+        epsilon (`float`, *optional*, defaults to 0.1):
+            The label smoothing factor.
+        ignore_index (`int`, *optional*, defaults to -100):
+            The index in the labels to ignore when computing the loss.
+    """
+
+    epsilon: float = 0.1
+    ignore_index: int = -100
+
+    def __call__(self, model_output, labels, shift_labels=False):
+        logits = model_output["logits"] if isinstance(model_output, dict) else model_output[0]
+        if shift_labels:
+            logits = logits[..., :-1, :].contiguous()
+            labels = labels[..., 1:].contiguous()
+
+        log_probs = -nn.functional.log_softmax(logits, dim=-1)
+        if labels.dim() == log_probs.dim() - 1:
+            labels = labels.unsqueeze(-1)
+
+        padding_mask = labels.eq(self.ignore_index)
+        # In case the ignore_index is -100, the gather will fail, so we replace labels by 0. The padding_mask
+        # will ignore them in any case.
+        labels = torch.clamp(labels, min=0)
+        nll_loss = log_probs.gather(dim=-1, index=labels)
+        # works for fp16 input tensor too, by internally upcasting it to fp32
+        smoothed_loss = log_probs.sum(dim=-1, keepdim=True, dtype=torch.float32)
+
+        nll_loss.masked_fill_(padding_mask, 0.0)
+        smoothed_loss.masked_fill_(padding_mask, 0.0)
+
+        # Take the mean over the label dimensions, then divide by the number of active elements (i.e. not-padded):
+        num_active_elements = padding_mask.numel() - padding_mask.long().sum()
+        nll_loss = nll_loss.sum() / num_active_elements
+        smoothed_loss = smoothed_loss.sum() / (num_active_elements * log_probs.shape[-1])
+        return (1 - self.epsilon) * nll_loss + self.epsilon * smoothed_loss
 
 
 

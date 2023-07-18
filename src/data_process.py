@@ -39,18 +39,12 @@ def preprocess_function(examples, src_lang, tgt_lang, tokenizer, max_input_lengt
     ## ! 不要再tokenizer的时候padding
     model_inputs = tokenizer(inputs, max_length=max_input_length, truncation=True)
 
-    # distilled_inputs = tokenizer.distilled_input_ids(inputs, max_length=max_input_length, truncation=True)
-    # model_inputs["distilled_input_ids"] = distilled_inputs["input_ids"]
-
     # Set up the tokenizer for targets 源语言与目标语言使用联合词典的
     with tokenizer.as_target_tokenizer():
         labels = tokenizer(targets, max_length=max_target_length, truncation=True)
 
     model_inputs["labels"] = labels["input_ids"]
 
-    ## ! 新老词表  在封装的tokenizer中包括了这个方法
-    # model_inputs["input_ids"] = old_id_2_new_id(model_inputs["input_ids"])
-    # model_inputs["labels"] = old_id_2_new_id(model_inputs["labels"])
     return model_inputs
 
 def get_paras_from_file(*files):
@@ -82,6 +76,8 @@ def get_tokenized_datasets(tokenizer, trans_para, src_lang, tgt_lang, max_input_
     注意 着里的trans_para 只能是有两个元素的，分别作为源语言和目标语言, 也可以是datasetdict
     只进行tokenized不做split trans_para 可以是list也可以是DatasetDict
     """
+    tokenizer.src_lang = src_lang
+    tokenizer.tgt_lang = tgt_lang
     batch_tokenize_fn = partial(preprocess_function,
                                 tokenizer=tokenizer,
                                 src_lang=src_lang,

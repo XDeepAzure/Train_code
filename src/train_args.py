@@ -14,7 +14,7 @@ def parse_args():
         "--student_path", type=str, default="", help="student model 所在位置"
     )
     parser.add_argument(
-        "--teacher_path", type=str, default="", help="student model 所在位置"
+        "--bi", type=lambda x: x=="true", default=False, help="student model 所在位置"
     )
     parser.add_argument(
         "--max_length", type=int, default=256, help="训练中的句子最大长度"

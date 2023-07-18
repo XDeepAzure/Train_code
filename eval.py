@@ -12,6 +12,8 @@ from transformers import (M2M100ForConditionalGeneration,
 from datasets import load_from_disk, DatasetDict
 from torch.utils.data import DataLoader
 
+from torch.cuda.amp import autocast as autocast
+
 import fire
 
 from src import get_data_from_flore
@@ -38,24 +40,32 @@ def get_compute_metric_fn(metrics):
 def evaluate_fn(model, tokenizer, src_lang, tgt_lang, data, batch_size=32, num_beams=4, max_length=128, metrics=["chrf"]):
     """
     data = {src_lang: [], tgt_lang: []}
+    return {"bleu": 20, "chrf":30}, predictions, references
     """
     tokenizer.src_lang = src_lang
     tokenizer.tgt_lang = tgt_lang
     model.eval()
     if model.device == torch.device("cpu"):
         model = model.cuda()
+    
+    predictions = []
+    references = data[tgt_lang]
+    num_batch = len(references) // batch_size if len(references) % batch_size == 0 else len(references) // batch_size +1
+    
     with torch.no_grad():
-        predictions = []
-        references = data[tgt_lang]
-        num_batch = len(references) // batch_size if len(references) % batch_size == 0 else len(references) // batch_size +1
         for i in tqdm(range(num_batch)):
             x = tokenizer(data[src_lang][i*batch_size:(i+1)*batch_size], padding=True, max_length=max_length, return_tensors="pt",truncation=True)
             for k, v in x.items():
                 x[k] = v.to(model.device)
-            outputs = model.generate(input_ids=x["input_ids"],
+            with autocast():
+                outputs = model.generate(input_ids=x["input_ids"],
                                      attention_mask=x["attention_mask"],
                                      num_beams=num_beams,
-                                     forced_bos_token_id=tokenizer.lang_code_to_id[tgt_lang])
+                                     decoder_start_token_id=tokenizer.lang_code_to_id[tgt_lang])            #mbart
+            # outputs = model.generate(input_ids=x["input_ids"],
+            #                          attention_mask=x["attention_mask"],
+            #                          num_beams=num_beams,
+            #                          forced_bos_token_id=tokenizer.lang_code_to_id[tgt_lang])             #nllb
             predictions += tokenizer.batch_decode(outputs.tolist(), skip_special_tokens=True)
 
     return_metrics = dict()
