@@ -1,12 +1,13 @@
 
-CUDA_VISIBLE_DEVICES="4"  python3 ./train.py \
+CUDA_VISIBLE_DEVICES="6"  python3 ./train.py \
     --src_lang nl_XX \
     --tgt_lang zh_CN \
     --bi false  \
     --student_path /data/hyxu/cached_dir/mbart-large-cc25 \
     --num_beams 5 \
     --saved_dir /data/hyxu/lowMT_compute/model \
-    --lr 2e-5 \
+    --label_smoothing_factor 0.2 \
+    --lr 2e-4 \
     --batch_size 16 \
     --accumulation 4 \
     --max_norm 2 \
@@ -17,8 +18,8 @@ CUDA_VISIBLE_DEVICES="4"  python3 ./train.py \
     --eval_strategy steps \
     --eval_step 3000 \
     --save_step 3000 \
-    --log_step  100 \
-    --num_epoch 5 \
+    --log_step  200 \
+    --num_epoch 10 \
     --steps "translate" \
     --optimer adamw \
     --metrics 'bleu,'\

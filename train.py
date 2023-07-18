@@ -105,9 +105,10 @@ def evaluate_(model, tokenizer, data=None, batch_size=32, num_beams=4,
                     metrics=metrics)
         outputs = outputs[0]
         for m, s in outputs.items():
-            return_metrics[f"k/{m}"] = s
+            return_metrics[f"{k}/{m}"] = s
         avg_scores.append(outputs[metrics[0]])
     return_metrics[f"avg_{metrics[0]}"] = sum(avg_scores) / len(avg_scores)
+    logger.info(return_metrics)
     return return_metrics
         
         
@@ -136,25 +137,12 @@ def main(args):
         return_metrics = dict()
         outputs = translate_step(model["model"], x)
 
+        return_metrics["translate_loss"] = outputs.loss.item()
+
+        outputs = trainer.label_smooth_step(outputs=outputs, labels=x["labels"], shift_labels=False)
+
         loss = outputs.loss
-        return_metrics["translate_loss"] = loss.item()
-        # if len(args.steps) > 0:
-        #     mask = x["labels"] != -100
-        #     teacher_outputs = teacher_forward(model["teacher"], x, tokenizer.pad_token_id,
-        #                                       decoder_start_token_id=model["student"].config.decoder_start_token_id)
-        #     # teacher_outputs.pop("past_key_values")
-        # if STEPS[1] in args.steps or STEPS[3] in args.steps:
-        #     distill_outputs = distill_enc_step(model["ffn"], teacher_outputs, outputs, x["attention_mask"], int(args.w_enc))
-        #     loss += distill_outputs.pop("loss").to(loss.device)
-        #     for k, v in distill_outputs.items():
-        #         return_metrics[k] = v
-        # if STEPS[2] in args.steps or STEPS[3] in args.steps:
-        #     distill_outputs = distill_dec_step(model["ffn"], teacher_outputs, outputs, mask, int(args.w_dec))
-        #     loss += distill_outputs.pop("loss").to(loss.device)
-        #     for k, v in distill_outputs.items():
-        #         return_metrics[k] = v
-        # if STEPS[4] in args.steps:
-            # pass                            # 未完待续
+        return_metrics["label_smooth_loss"] = loss.item()
 
         return loss, return_metrics
 
