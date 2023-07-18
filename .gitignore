@@ -1,5 +1,6 @@
 /__pycache__
 /both.log
+/data
 /log
 /model
 /pure.py
