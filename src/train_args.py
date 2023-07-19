@@ -69,7 +69,7 @@ def parse_args():
         "--optimer", type=str, default="adamw", help="优化器"
     )
     parser.add_argument(                        # 暂未实现
-        "--warmup_steps", type=int, default=100
+        "--warmup_steps", type=int, default=2000
     )
     parser.add_argument(
         "--lr", type=float, default=2e-5, help="训练baseline用的是2e-5, retrain用的是4e-6"
