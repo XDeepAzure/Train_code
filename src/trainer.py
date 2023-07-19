@@ -1,7 +1,7 @@
 import os
 from logging import getLogger
 import shutil
-
+from dataclasses import dataclass
 import torch
 
 from tqdm import tqdm
@@ -30,7 +30,7 @@ STRATEGY = ("steps", "epoch")
 
 
 def avg(x):
-    assert isinstance(x[0], int)
+    # assert isinstance(x[0], int)
     return sum(x) / len(x)
 
 def to_same_device(x, y):
@@ -136,7 +136,7 @@ class Trainer(object):
                  batch_size=32, seed=10, saved_dir="./", shuffle=True, datasets=None,
                  train_strategy=STRATEGY[0], eval_strategy=STRATEGY[0], save_step=1, eval_step=1, log_step=100,
                  num_epoch=3, max_step=10000, metrics=["chrf"], amp=True, optimizer=OPTIMIZER[0], lr=2e-5,
-                 weight_decay=0.01, save_num=3) -> None:
+                 weight_decay=0.01, save_num=3, label_smoothing_factor=0) -> None:
 
         # self.optimizer                                    # 默认optimizer是adamw
         # self.check_params(args)
@@ -184,6 +184,8 @@ class Trainer(object):
         self.best_model = []
         self.save_num = save_num
         self.update_step = 0
+
+        self.label_smoothing_factor = label_smoothing_factor
 
         pass
 
@@ -338,6 +340,12 @@ class Trainer(object):
         assert x != None, "get x error"
         return x
     
+    def label_smooth_step(self, outputs, labels, shift_labels=False):
+        if self.label_smoother:
+            loss = self.label_smoother(outputs, labels, shift_labels=shift_labels)
+        outputs.loss = loss
+        return outputs
+
     def train_step(self, train_steps_fn):
         loss = None                     # total loss
         return_metric = dict()
@@ -408,6 +416,11 @@ class Trainer(object):
         assert isinstance(self.model, dict)
         self.datasets = datasets
         self.get_dataloader(shuffle=shuffle)
+
+        if self.label_smoothing_factor != 0:
+            self.label_smoother = LabelSmoother(epsilon=self.label_smoothing_factor)
+        else:
+            self.label_smoother = None
 
         # 设置参数
         self.epoch_size = len(self.data_loader["train"])        # 有多少个批次，不是更新步数
@@ -484,7 +497,7 @@ class Trainer(object):
         # else:
         #     self.label_smoother = None
 
-# @dataclass
+@dataclass
 class LabelSmoother:
     """
     Adds label-smoothing on a pre-computed output from a Transformers model.
@@ -500,6 +513,7 @@ class LabelSmoother:
     ignore_index: int = -100
 
     def __call__(self, model_output, labels, shift_labels=False):
+        # mbartForCodication 是false
         logits = model_output["logits"] if isinstance(model_output, dict) else model_output[0]
         if shift_labels:
             logits = logits[..., :-1, :].contiguous()
@@ -509,7 +523,7 @@ class LabelSmoother:
         if labels.dim() == log_probs.dim() - 1:
             labels = labels.unsqueeze(-1)
 
-        padding_mask = labels.eq(self.ignore_index)
+        padding_mask = labels.eq(self.ignore_index)                         # ignore_index
         # In case the ignore_index is -100, the gather will fail, so we replace labels by 0. The padding_mask
         # will ignore them in any case.
         labels = torch.clamp(labels, min=0)
