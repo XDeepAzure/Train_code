@@ -14,6 +14,7 @@ from torch.cuda.amp import autocast as autocast
 from torch.cuda.amp import GradScaler
 
 import torch.nn as nn
+import pytorch_warmup as warmup
 
 from src.model import PureFFN
 from transformers.models.m2m_100.modeling_m2m_100 import M2M100Encoder, M2M100Model, shift_tokens_right
@@ -136,7 +137,7 @@ class Trainer(object):
                  batch_size=32, seed=10, saved_dir="./", shuffle=True, datasets=None,
                  train_strategy=STRATEGY[0], eval_strategy=STRATEGY[0], save_step=1, eval_step=1, log_step=100,
                  num_epoch=3, max_step=10000, metrics=["chrf"], amp=True, optimizer=OPTIMIZER[0], lr=2e-5,
-                 weight_decay=0.01, save_num=3, label_smoothing_factor=0) -> None:
+                 weight_decay=0.01, save_num=3, label_smoothing_factor=0, warmup_steps=2000) -> None:
 
         # self.optimizer                                    # 默认optimizer是adamw
         # self.check_params(args)
@@ -179,6 +180,7 @@ class Trainer(object):
         self.lr = lr
         assert optimizer in OPTIMIZER
         self.optimizer = optimizer
+        self.warmup_steps = warmup_steps
         
         self.parameters = None
         self.best_model = []
@@ -248,6 +250,7 @@ class Trainer(object):
         self.args = args
 
     def init_optimizer(self):
+        """可以添加上warm up的方法"""
         if self.parameters == None or len(self.parameters) < 1:
             self.parameters = []
             for v in self.model.values():
@@ -261,7 +264,12 @@ class Trainer(object):
             assert 1==2, "优化器暂未完成"
         logger.info(self.optimizer)
         return self.optimizer
-    
+
+    def create_lr_scheduler(self):
+        if self.optimizer == None:
+            self.init_optimizer()
+        self.lr_scheduler = torch.optim.lr_scheduler.LinearLR(self.optimizer, total_iters=self.warmup_steps, verbose=False)
+
     def _create_dataloader(self, dataset, batch_size, shuffle=False):
         data_collator = DataCollatorForSeq2Seq(self.tokenizer, padding=True, 
                                                max_length=self.max_length)
@@ -343,7 +351,7 @@ class Trainer(object):
     def label_smooth_step(self, outputs, labels, shift_labels=False):
         if self.label_smoother:
             loss = self.label_smoother(outputs, labels, shift_labels=shift_labels)
-        outputs.loss = loss
+            outputs.loss = loss
         return outputs
 
     def train_step(self, train_steps_fn):
@@ -381,6 +389,7 @@ class Trainer(object):
 
                 scaler.step(self.optimizer)
                 self.optimizer.zero_grad()
+                self.lr_scheduler.step()
                 self.update_step += 1
                 p_bar.update(1)
                 scaler.update()
@@ -389,6 +398,7 @@ class Trainer(object):
                 if self.update_step % self.log_step == 0:
                     metrics["tag"] = "train"
                     metrics["epoch"] = self.update_step / eval_update_num_epoch
+                    metrics["lr"] = self.optimizer.param_groups[0]['lr']
                     self.log_metric(metrics=metrics,step=self.update_step)
                 # eval step
                 if self.update_step % self.eval_step == 0:
@@ -429,6 +439,7 @@ class Trainer(object):
 
         self.writer = SummaryWriter(self.saved_dir)         # 记录
         self.init_optimizer()
+        self.create_lr_scheduler()
 
         if self.train_strategy == STRATEGY[1]:
             self.max_step = each_epoch_num_uptate* self.num_epoch
