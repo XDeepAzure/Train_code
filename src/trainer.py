@@ -268,7 +268,17 @@ class Trainer(object):
     def create_lr_scheduler(self):
         if self.optimizer == None:
             self.init_optimizer()
-        self.lr_scheduler = torch.optim.lr_scheduler.LinearLR(self.optimizer, total_iters=self.warmup_steps, verbose=False)
+        if self.warmup_steps <= 0:
+            start_factor, end_factor = 1.0, 1.0
+            total_iters: int = 1
+            last_epoch = 1
+        else:
+            start_factor, end_factor= 0.3, 1.0
+            total_iters: int = self.warmup_steps
+            last_epoch = -1
+        
+        self.lr_scheduler = torch.optim.lr_scheduler.LinearLR(self.optimizer, start_factor=start_factor, end_factor=end_factor,
+                                                               total_iters=total_iters, last_epoch=last_epoch, verbose=False)
 
     def _create_dataloader(self, dataset, batch_size, shuffle=False):
         data_collator = DataCollatorForSeq2Seq(self.tokenizer, padding=True, 
@@ -417,6 +427,7 @@ class Trainer(object):
 
     def train_end(self, epoch):
         logger.critical(f"训练结束，第{epoch} epoch {self.update_step} step 结束")
+        logger.critical(f"{self.best_model}")
 
     def train(self, train_steps_fn, datasets, evaluate_fn=None, shuffle=True):
         """

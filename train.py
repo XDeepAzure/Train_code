@@ -88,7 +88,7 @@ def get_DatasetDict(data_dir, src_lang, tgt_lang, src_file, tgt_file, tokenizer,
         else:
             data_dict = load_from_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
     
-    test = Dataset.load_from_disk("/data/hyxu/codes/lowMT_compute/data/public_data/dev_set")
+    test = Dataset.load_from_disk("/data/hyxu/lowMT_compute/data/public_data/dev_set")
 
     data_dict["dev"] = {f"{src_lang}-{tgt_lang}": test}
     if bi:
@@ -136,26 +136,11 @@ def main(args):
         loss = None
         return_metrics = dict()
         outputs = translate_step(model["model"], x)
+        return_metrics["translate_loss"] = outputs.loss.item()
 
+        trainer.label_smooth_step(outputs=outputs, labels=x["labels"], shift_labels=False)
         loss = outputs.loss
-        return_metrics["translate_loss"] = loss.item()
-        # if len(args.steps) > 0:
-        #     mask = x["labels"] != -100
-        #     teacher_outputs = teacher_forward(model["teacher"], x, tokenizer.pad_token_id,
-        #                                       decoder_start_token_id=model["student"].config.decoder_start_token_id)
-        #     # teacher_outputs.pop("past_key_values")
-        # if STEPS[1] in args.steps or STEPS[3] in args.steps:
-        #     distill_outputs = distill_enc_step(model["ffn"], teacher_outputs, outputs, x["attention_mask"], int(args.w_enc))
-        #     loss += distill_outputs.pop("loss").to(loss.device)
-        #     for k, v in distill_outputs.items():
-        #         return_metrics[k] = v
-        # if STEPS[2] in args.steps or STEPS[3] in args.steps:
-        #     distill_outputs = distill_dec_step(model["ffn"], teacher_outputs, outputs, mask, int(args.w_dec))
-        #     loss += distill_outputs.pop("loss").to(loss.device)
-        #     for k, v in distill_outputs.items():
-        #         return_metrics[k] = v
-        # if STEPS[4] in args.steps:
-            # pass                            # 未完待续
+        return_metrics["label_smooth_loss"] = loss.item()
 
         return loss, return_metrics
 
