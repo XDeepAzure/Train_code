@@ -99,6 +99,7 @@ def evaluate_(model, tokenizer, data=None, batch_size=32, num_beams=4,
                   max_length=128, metrics=["chrf"], split="test", output_dir=None, save_text=False):
     avg_scores = []
     return_metrics = dict()
+    logger.info("==============evaluate begin===============")
     for k, v in data.items():
         s, t = k.split("-")
         outputs = evaluate_fn(model["model"], tokenizer, s, t, {s:v[s], t:v[t]}, batch_size=batch_size, num_beams=num_beams, max_length=max_length,
@@ -136,11 +137,13 @@ def main(args):
         loss = None
         return_metrics = dict()
         outputs = translate_step(model["model"], x)
-        return_metrics["translate_loss"] = outputs.loss.item()
-
-        trainer.label_smooth_step(outputs=outputs, labels=x["labels"], shift_labels=False)
         loss = outputs.loss
-        return_metrics["label_smooth_loss"] = loss.item()
+        return_metrics["translate_loss"] = outputs.loss.item()
+        if trainer.label_smoother:
+            outputs = trainer.label_smooth_step(outputs=outputs, labels=x["labels"], shift_labels=False)
+            loss = outputs.loss
+            return_metrics["label_smooth_loss"] = loss.item()
+        
 
         return loss, return_metrics
 

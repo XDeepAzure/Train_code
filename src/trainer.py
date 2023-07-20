@@ -193,14 +193,6 @@ class Trainer(object):
 
     def check_params(self, args):
         """设置一些默认值"""
-
-        # if not hasattr(args, "input_size"):
-        #     args.input_size = 1024                          # nllb-600M
-        # if not hasattr(args, "hidden_size"):
-        #     args.input_size = 1280                          # 1024 + 256
-        # if not hasattr(args, "input_size"):
-        #     args.input_size = 2048                          # nllb-3.3B
-        
         
         if not hasattr(args, "save_dir"):
             args.save_dir = os.path.abspath()
@@ -288,11 +280,7 @@ class Trainer(object):
                                 collate_fn=data_collator, shuffle=shuffle))
 
     def log_metric(self, metrics, step):
-        # logger.info(metrics)
-        # metrics = dict()
-        # step = metrics.pop("step", -1)
         tag = metrics.pop("tag", "train")
-        # import pdb;pdb.set_trace()
         assert step > 0, "未设置step"
         for k, v in metrics.items():
             self.writer.add_scalar(tag=f"{tag}/{k}",
@@ -368,17 +356,10 @@ class Trainer(object):
         loss = None                     # total loss
         return_metric = dict()
 
+        # ! 数据调用
         x = self.get_batch(split="train", shuffle=self.shuffle)
 
         loss, return_metric = train_steps_fn(self.model, x)
-        # outputs = self.translate_step(self.model["student_model"], x)
-
-        # return_metric["translate_loss"] = loss.item()
-        # loss = outputs.loss
-        # for k_step, step_fn in train_steps:
-        #     outputs = train_steps()
-
-        # raise NotImplementedError
 
         return loss, return_metric
 
@@ -410,6 +391,7 @@ class Trainer(object):
                     metrics["epoch"] = self.update_step / eval_update_num_epoch
                     metrics["lr"] = self.optimizer.param_groups[0]['lr']
                     self.log_metric(metrics=metrics,step=self.update_step)
+                    
                 # eval step
                 if self.update_step % self.eval_step == 0:
                     metrics = evaluate_step_fn(self.model, self.tokenizer,
@@ -426,8 +408,10 @@ class Trainer(object):
         pass
 
     def train_end(self, epoch):
+        # self.writer.add_hparams(hparam_dict={},
+        #                         metric_dict={self.metrics[0]: self.best_model["metric"]})
         logger.critical(f"训练结束，第{epoch} epoch {self.update_step} step 结束")
-        logger.critical(f"{self.best_model}")
+        logger.critical(f"best model is {self.best_model}")
 
     def train(self, train_steps_fn, datasets, evaluate_fn=None, shuffle=True):
         """
@@ -467,6 +451,7 @@ class Trainer(object):
             scaler = GradScaler()
             p_bar = tqdm(total=self.max_step)                          ## TODO
             for epoch in range(self.num_epoch):
+                logger.info(f"第 {epoch} 个epoch训练完毕")
                 self.train_epoch_amp(scaler, train_steps_fn, p_bar, evaluate_fn)
                 ## ! 训练结束
                 if self.update_step >= self.max_step:
