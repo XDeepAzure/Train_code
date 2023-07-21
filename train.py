@@ -64,7 +64,7 @@ def model_tocuda(teacher_model, student_model, ffn_model):
     student_model = student_model.to(device2)                                       # 学生放在第二张卡上
     return teacher_model, student_model, ffn_model
 
-def get_DatasetDict(data_dir, src_lang, tgt_lang, src_file, tgt_file, tokenizer, max_length, batch_size, bi=False) -> DatasetDict:
+def get_DatasetDict(data_dir, src_lang, tgt_lang, src_file, tgt_file, steps, tokenizer, max_length, batch_size, bi=False) -> DatasetDict:
     if bi:                                                                     # 是不是用的双向翻译模型
         if not os.path.exists(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}")):
             trans_para = get_paras_from_file(os.path.join(data_dir, src_file[0]), os.path.join(data_dir, tgt_file[0]))
@@ -139,12 +139,12 @@ def main(args):
             translate_output = translate_step(model["model"], x)
             outputs = trainer.label_smooth_step(outputs=translate_output, labels=x["labels"], shift_labels=False)
             step_outputs.append(outputs)
-        if STEPS[1] in args.setps:
+        if STEPS[1] in args.steps:
             pass
         
         return_metrics = dict()
         for m in step_outputs:
-            loss += m.pop["loss"]
+            loss += m.pop("loss")
             for k, v in m.items():
                 return_metrics[k] = v
         return loss, return_metrics

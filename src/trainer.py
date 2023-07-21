@@ -263,7 +263,6 @@ class Trainer(object):
         else:
             assert 1==2, "优化器暂未完成"
         logger.info(self.optimizer)
-        return self.optimizer
 
     def create_lr_scheduler(self):
         if self.optimizer == None:
@@ -271,7 +270,7 @@ class Trainer(object):
         if self.warmup_steps <= 0:
             start_factor, end_factor = 1.0, 1.0
             total_iters: int = 1
-            last_epoch = 1
+            last_epoch = -1
         else:
             start_factor, end_factor= 0.3, 1.0
             total_iters: int = self.warmup_steps
@@ -355,12 +354,15 @@ class Trainer(object):
         return x
     
     def label_smooth_step(self, outputs, labels, shift_labels=False):
-        return_metrics = {"translate_loss": outputs.loss.item()}
+        return_metrics = {"translate_loss": outputs["loss"].item() if isinstance(outputs, dict) else outputs.loss.item()}
         if self.label_smoother:
             loss = self.label_smoother(outputs, labels, shift_labels=shift_labels)
-            outputs.loss = loss
-            return_metrics["smooth_loss"] = outputs.loss.item()
-        return_metrics["loss"] = outputs.loss
+            if hasattr(outputs, loss):
+                outputs.loss = loss
+            else:
+                outputs["loss"] = loss
+            return_metrics["smooth_loss"] = outputs.loss.item() if hasattr(outputs, "loss") else outputs["loss"].item()
+        return_metrics["loss"] = outputs.loss if hasattr(outputs, "loss") else outputs["loss"]
         return return_metrics
 
     def train_step(self, train_steps_fn):
