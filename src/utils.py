@@ -15,21 +15,21 @@ langs = ['nus_Latn', 'ltg_Latn', 'arz_Arab', 'srd_Latn', 'mag_Deva', 'bjn_Latn',
          'dik_Latn', 'lmo_Latn', 'ace_Latn', 'pbt_Arab', 'lim_Latn', 'kas_Deva', 'bjn_Arab', \
          'mri_Latn', 'bho_Deva', 'scn_Latn', 'mni_Beng', "eng_Latn"]
 
-def setup_seed(seed):
-    torch.manual_seed(seed)                                 #不是返回一个生成器吗？
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True               #使用确定性的卷积算法
 # def setup_seed(seed):
-#     random.seed(seed)
-#     os.environ['PYTHONHASHSEED'] = str(seed)
+#     torch.manual_seed(seed)                                 #不是返回一个生成器吗？
+#     torch.cuda.manual_seed_all(seed)
 #     np.random.seed(seed)
-#     torch.manual_seed(seed)
-#     torch.cuda.manual_seed(seed)
-#     torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
-#     torch.backends.cudnn.benchmark = False
-#     torch.backends.cudnn.deterministic = True
+#     random.seed(seed)
+#     torch.backends.cudnn.deterministic = True               #使用确定性的卷积算法
+def setup_seed(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
 class LogFormatter():
 

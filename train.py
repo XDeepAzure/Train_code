@@ -11,7 +11,8 @@ from transformers import (AutoModelForSeq2SeqLM,
 from transformers.models.m2m_100.modeling_m2m_100 import M2M100Encoder, M2M100Model, shift_tokens_right
 from src.train_args import parse_args
 from src.utils import create_logger, setup_seed
-from src import (Trainer, STEPS, translate_step, get_tokenized_datasets, get_paras_from_file)
+from src import (Trainer, STEPS, translate_step, get_tokenized_datasets, get_paras_from_file,
+                 load_translate_datasets, load_denoising_datasets)
 from eval import evaluate_both, evaluate_fn
 
 from logging import getLogger
@@ -27,6 +28,10 @@ def check_params(args):
     args.saved_dir = os.path.join(args.saved_dir, args.name)
     args.src_file = args.src_file.split(",")
     args.tgt_file = args.tgt_file.split(",")
+    args.denoising_file = args.denosing_file.split(",")
+    args.denoising_langs = args.denoising_langs.split(",")
+    assert len(args.denoising_langs) == len(args.denoising_file)
+
     if not os.path.exists(args.saved_dir):
         os.mkdir(args.saved_dir)
     global logger
@@ -64,35 +69,49 @@ def model_tocuda(teacher_model, student_model, ffn_model):
     student_model = student_model.to(device2)                                       # 学生放在第二张卡上
     return teacher_model, student_model, ffn_model
 
-def get_DatasetDict(data_dir, src_lang, tgt_lang, src_file, tgt_file, steps, tokenizer, max_length, batch_size, bi=False) -> DatasetDict:
-    if bi:                                                                     # 是不是用的双向翻译模型
-        if not os.path.exists(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}")):
-            trans_para = get_paras_from_file(os.path.join(data_dir, src_file[0]), os.path.join(data_dir, tgt_file[0]))
-            data = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=src_lang, tgt_lang=tgt_lang,
-                                          max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
-            data1 = data["train"].to_dict()
-            trans_para = get_paras_from_file(os.path.join(data_dir, tgt_file[0]), os.path.join(data_dir, src_file[0]))
-            data = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=tgt_lang, tgt_lang=src_lang,
-                                          max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
-            data = {k: v+data1[k] for k, v in data["train"].to_dict().items()}
-            data_dict = DatasetDict({"train": Dataset.from_dict(data)})
-            data_dict.save_to_disk(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}"))
-        else:
-            data_dict = load_from_disk(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}"))
-    else:
-        if not os.path.exists(os.path.join(data_dir, f"{src_lang}-{tgt_lang}")):
-            trans_para = get_paras_from_file(os.path.join(data_dir, src_file[0]), os.path.join(data_dir, tgt_file[0]))
-            data_dict = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=src_lang, tgt_lang=tgt_lang,
-                                          max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
-            data_dict.save_to_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
-        else:
-            data_dict = load_from_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
+def get_DatasetDict(data_dir, src_lang, tgt_lang, src_file, tgt_file, denoising_file, denoising_langs,
+                    steps, tokenizer, max_length, batch_size, bi=False) -> DatasetDict:
+    # if bi:                                                                     # 是不是用的双向翻译模型
+    #     if not os.path.exists(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}")):
+    #         trans_para = get_paras_from_file(os.path.join(data_dir, src_file[0]), os.path.join(data_dir, tgt_file[0]))
+    #         data = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=src_lang, tgt_lang=tgt_lang,
+    #                                       max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
+    #         data1 = data["train"].to_dict()
+    #         trans_para = get_paras_from_file(os.path.join(data_dir, tgt_file[0]), os.path.join(data_dir, src_file[0]))
+    #         data = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=tgt_lang, tgt_lang=src_lang,
+    #                                       max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
+    #         data = {k: v+data1[k] for k, v in data["train"].to_dict().items()}
+    #         data_dict = DatasetDict({"train": Dataset.from_dict(data)})
+    #         data_dict.save_to_disk(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}"))
+    #     else:
+    #         data_dict = load_from_disk(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}"))
+    # else:
+    #     if not os.path.exists(os.path.join(data_dir, f"{src_lang}-{tgt_lang}")):
+    #         trans_para = get_paras_from_file(os.path.join(data_dir, src_file[0]), os.path.join(data_dir, tgt_file[0]))
+    #         data_dict = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=src_lang, tgt_lang=tgt_lang,
+    #                                       max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
+    #         data_dict.save_to_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
+    #     else:
+    #         data_dict = load_from_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
     
-    test = Dataset.load_from_disk("/data/hyxu/lowMT_compute/data/public_data/dev_set")
+    # test = Dataset.load_from_disk("/data/hyxu/lowMT_compute/data/public_data/dev_set")
 
-    data_dict["dev"] = {f"{src_lang}-{tgt_lang}": test}
-    if bi:
-        data_dict["dev"][f"{tgt_lang}-{src_lang}"] = test    
+    # data_dict["dev"] = {f"{src_lang}-{tgt_lang}": test}
+    # if bi:
+    #     data_dict["dev"][f"{tgt_lang}-{src_lang}"] = test   
+    data_dict = dict()
+    translate_dataset = load_translate_datasets(data_dir=data_dir, src_lang=src_lang, tgt_lang=tgt_lang,
+                src_file=src_file, tgt_file=tgt_file, tokenizer=tokenizer, max_length=max_length, batch_size=batch_size, bi=bi)
+    data_dict[STEPS[0]] = translate_dataset
+
+    if STEPS[1] in steps:
+        denoising = {}
+        for f_p, lang in zip(denoising_file, denoising_langs):
+            denoising_dataset = load_denoising_datasets(data_dir=data_dir, denoising_file=f_p, lang=lang,
+                                                        tokenizer=tokenizer, max_length=max_length, batch_size=batch_size)
+            denoising[lang] = denoising_dataset
+        data_dict[STEPS[1]]  = denoising
+
     return data_dict
 
 def evaluate_(model, tokenizer, data=None, batch_size=32, num_beams=4,
@@ -129,7 +148,8 @@ def main(args):
     trainer.tokenizer = tokenizer
     # 获取数据集
     data = get_DatasetDict(data_dir=args.data_dir, src_lang=args.src_lang, tgt_lang=args.tgt_lang,
-                           src_file=args.src_file, tgt_file=args.tgt_file,steps=args.steps,
+                           src_file=args.src_file, tgt_file=args.tgt_file, denoising_file=args.denoising_file,
+                           denoising_langs=args.denoising_langs, steps=args.steps,
                            tokenizer=tokenizer, max_length=args.max_length, batch_size=args.batch_size, bi=args.bi)
 
     def train_steps_fn(model, x):

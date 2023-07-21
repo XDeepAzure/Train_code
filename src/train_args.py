@@ -49,6 +49,12 @@ def parse_args():
         "--tgt_file", type=str, default=""
     )
     parser.add_argument(
+        "--denoising_file", type=str, default=""
+    )
+    parser.add_argument(
+        "--denoising_langs", type=str, default=""
+    )
+    parser.add_argument(
         "--test_dataset", type=str, default="flores", help="在train和retrain里决定是否用flores的dev和test集"
     )
     ## !评估

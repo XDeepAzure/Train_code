@@ -5,7 +5,7 @@ from .data_process import (get_tokenized_datasets,
                           get_datasets_from_flores,
                           get_translate_paras_from_file,
                           PureDataCollator,
-                          get_data_from_flore
+                          get_data_from_flore,load_translate_datasets, load_denoising_datasets
                           )
 
 from .model import PureM2M100, PureFFN
