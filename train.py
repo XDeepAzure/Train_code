@@ -119,7 +119,6 @@ def main(args):
     setup_seed(args.seed)
     
     trainer = get_trainer(args)
-
     student = AutoModelForSeq2SeqLM.from_pretrained(args.student_path)
 
     tokenizer = AutoTokenizer.from_pretrained(args.student_path)
@@ -130,21 +129,24 @@ def main(args):
     trainer.tokenizer = tokenizer
     # 获取数据集
     data = get_DatasetDict(data_dir=args.data_dir, src_lang=args.src_lang, tgt_lang=args.tgt_lang,
-                           src_file=args.src_file, tgt_file=args.tgt_file,
+                           src_file=args.src_file, tgt_file=args.tgt_file,steps=args.steps,
                            tokenizer=tokenizer, max_length=args.max_length, batch_size=args.batch_size, bi=args.bi)
 
     def train_steps_fn(model, x):
-        loss = None
-        return_metrics = dict()
-        outputs = translate_step(model["model"], x)
-        loss = outputs.loss
-        return_metrics["translate_loss"] = outputs.loss.item()
-        if trainer.label_smoother:
-            outputs = trainer.label_smooth_step(outputs=outputs, labels=x["labels"], shift_labels=False)
-            loss = outputs.loss
-            return_metrics["label_smooth_loss"] = loss.item()
+        loss = 0
+        step_outputs = []
+        if STEPS[0] in args.steps:
+            translate_output = translate_step(model["model"], x)
+            outputs = trainer.label_smooth_step(outputs=translate_output, labels=x["labels"], shift_labels=False)
+            step_outputs.append(outputs)
+        if STEPS[1] in args.setps:
+            pass
         
-
+        return_metrics = dict()
+        for m in step_outputs:
+            loss += m.pop["loss"]
+            for k, v in m.items():
+                return_metrics[k] = v
         return loss, return_metrics
 
     trainer.train(train_steps_fn, data, evaluate_fn=evaluate_, shuffle=args.shuffle)

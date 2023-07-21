@@ -72,7 +72,15 @@ def translate_step(model, x):
     """ 翻译任务的步骤，包含 encoder_last_hidden_state,  decoder_hidden_states(12层)"""
     for k, v in x.items():
         x[k] = v.to(model.device)
-    return model(**x, output_hidden_states=False)
+    outputs = model(**x, output_hidden_states=False)
+    return {k: v for k, v in outputs.items()}
+
+def denoising_step(model, x, w):
+    for k, v in x.items():
+        x[k] = v.to(model.device)
+    outputs = model(**x, output_hidden_states=False)
+    return {"loss": outputs.loss * w, "denoising_loss": outputs.loss.item()}
+
 
 def teacher_forward(model, x, pad_token_id, decoder_start_token_id):
     """返回teacher的forward结果 包含encoder_last_hidden_state, last_hidden_state"""
@@ -347,10 +355,13 @@ class Trainer(object):
         return x
     
     def label_smooth_step(self, outputs, labels, shift_labels=False):
+        return_metrics = {"translate_loss": outputs.loss.item()}
         if self.label_smoother:
             loss = self.label_smoother(outputs, labels, shift_labels=shift_labels)
             outputs.loss = loss
-        return outputs
+            return_metrics["smooth_loss"] = outputs.loss.item()
+        return_metrics["loss"] = outputs.loss
+        return return_metrics
 
     def train_step(self, train_steps_fn):
         loss = None                     # total loss

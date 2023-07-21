@@ -14,4 +14,4 @@ from .trainer import Trainer, distill_dec_step, distill_enc_step, teacher_forwar
 
 from .train_args import parse_args
 
-STEPS = ("translate", "enc", "dec", "enc-dec", "dec_noise")
+STEPS = ("translate", "denoising", "enc", "dec", "enc-dec", "dec_noise")
