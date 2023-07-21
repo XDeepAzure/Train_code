@@ -7,3 +7,5 @@
 /render.html
 /test.ipynb
 ./data/public_data
+./data/public_data/train/mono/train.nl
+./data/public_data/train/mono/train.zh
