@@ -175,6 +175,7 @@ def load_denoising_datasets(data_dir, denoising_file, lang, tokenizer, max_lengt
     if os.path.exists(dataset_path):
         data = load_from_disk(dataset_path)
     else:
+        logger.critical(f"构造单语数据的噪音数据集 {lang} => {os.path.join(data_dir, denoising_file)}")
         def _filter(s):
             return s.strip(" ").strip("\n")
         with open(os.path.join(data_dir, denoising_file), "r") as f:
@@ -185,7 +186,7 @@ def load_denoising_datasets(data_dir, denoising_file, lang, tokenizer, max_lengt
         for s in tqdm(data):
             inputs = tokenizer(s, max_length=max_length, truncation=True)
             labels.append(inputs["input_ids"])
-            nosie_inputs = add_span_mask_noise(inputs["input_ids"])
+            nosie_inputs = add_span_mask_noise(tokenizer.vocab_size, inputs["input_ids"])
             data_intputs.append(nosie_inputs)
             mask.append([1 for _ in nosie_inputs])
         data = Dataset.from_dict({"input_ids": data_intputs, "attention_mask": mask, "labels": labels})
@@ -338,10 +339,10 @@ def random_spans_noise_mask(noise_density, mean_noise_span_length, length):
 
         return is_noise[:orig_length]
 
-def add_span_mask_noise(item):
-    noise_mask = random_spans_noise_mask(len(item))
+def add_span_mask_noise(vocab_size, item, noise_density=0.15, mean_noise_span_length=3):
+    noise_mask = random_spans_noise_mask(noise_density, mean_noise_span_length, len(item))
 
-    source_sentinel_ids = create_sentinel_ids(noise_mask.astype(np.int8))
+    source_sentinel_ids = create_sentinel_ids(noise_mask.astype(np.int8), vocab_size)
     source = filter_input_ids(item, source_sentinel_ids)
     return source
 

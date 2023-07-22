@@ -11,7 +11,8 @@ from transformers import (AutoModelForSeq2SeqLM,
 from transformers.models.m2m_100.modeling_m2m_100 import M2M100Encoder, M2M100Model, shift_tokens_right
 from src.train_args import parse_args
 from src.utils import create_logger, setup_seed
-from src import (Trainer, STEPS, translate_step, get_tokenized_datasets, get_paras_from_file,
+from src import (Trainer, STEPS, translate_step, denoising_step, 
+                 get_tokenized_datasets, get_paras_from_file,
                  load_translate_datasets, load_denoising_datasets)
 from eval import evaluate_both, evaluate_fn
 
@@ -28,9 +29,11 @@ def check_params(args):
     args.saved_dir = os.path.join(args.saved_dir, args.name)
     args.src_file = args.src_file.split(",")
     args.tgt_file = args.tgt_file.split(",")
-    args.denoising_file = args.denosing_file.split(",")
+    args.denoising_file = args.denoising_file.split(",")
     args.denoising_langs = args.denoising_langs.split(",")
     assert len(args.denoising_langs) == len(args.denoising_file)
+
+    args.w_noise = float(args.w_noise)
 
     if not os.path.exists(args.saved_dir):
         os.mkdir(args.saved_dir)
@@ -152,14 +155,19 @@ def main(args):
                            denoising_langs=args.denoising_langs, steps=args.steps,
                            tokenizer=tokenizer, max_length=args.max_length, batch_size=args.batch_size, bi=args.bi)
 
-    def train_steps_fn(model, x):
+    def train_steps_fn(model):
         loss = 0
         step_outputs = []
         if STEPS[0] in args.steps:
+            x = trainer.get_batch(STEPS[0], "train", trainer.shuffle)
             translate_output = translate_step(model["model"], x)
             outputs = trainer.label_smooth_step(outputs=translate_output, labels=x["labels"], shift_labels=False)
             step_outputs.append(outputs)
         if STEPS[1] in args.steps:
+            for lang in args.denoising_langs:
+                x = trainer.get_batch(STEPS[1], lang, trainer.shuffle)
+                outputs = denoising_step(model["model"], x, lang, args.w_noise)
+                step_outputs.append(outputs)
             pass
         
         return_metrics = dict()

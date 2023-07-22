@@ -75,11 +75,11 @@ def translate_step(model, x):
     outputs = model(**x, output_hidden_states=False)
     return {k: v for k, v in outputs.items()}
 
-def denoising_step(model, x, w):
+def denoising_step(model, x, lang, w):
     for k, v in x.items():
         x[k] = v.to(model.device)
     outputs = model(**x, output_hidden_states=False)
-    return {"loss": outputs.loss * w, "denoising_loss": outputs.loss.item()}
+    return {"loss": outputs.loss * w, f"{lang}_denoising_loss": outputs.loss.item()}
 
 
 def teacher_forward(model, x, pad_token_id, decoder_start_token_id):
@@ -333,23 +333,31 @@ class Trainer(object):
         self.data_loader = dict()
         shuffle = self.shuffle
         for k, v in self.datasets.items():
+            ## ! 扩展一下到多个数据集
             if not isinstance(v, dict):
                 self.data_loader[k] = self._create_dataloader(v, self.batch_size, shuffle)
                 logger.info(f"step {k} create dataloader on {v}")
+            else:
+                dit = dict()
+                for sub_k, sub_v in v.items():
+                    dit[sub_k] = self._create_dataloader(sub_v, self.batch_size, shuffle)
+                    logger.info(f"step {k} {sub_k} create dataloader on {sub_v}")
+                self.data_loader[k] = dit
+
 
         # return None
 
-    def get_batch(self, split, shuffle):            ## TODO shuffle考虑去掉
+    def get_batch(self, step, split, shuffle):            ## TODO shuffle考虑去掉
         """
 
         """
-        x = next(self.data_loader[split], None)
+        x = next(self.data_loader[step][split], None)
         if x is None:
             # get_datasets_iter()         #
-            self.data_loader[split] = self._create_dataloader(self.datasets[split], self.batch_size, shuffle)
-            logger.info(f"step {split} create dataloader on {self.datasets[split]}")
+            self.data_loader[step][split] = self._create_dataloader(self.datasets[step][split], self.batch_size, shuffle)
+            logger.info(f"{step} {split} create dataloader on {self.datasets[step][split]}")
             # 待实现，就是如果一个epoch数据取完了，接下来创建新的数据集
-            x = next(self.data_loader[split], None)
+            x = next(self.data_loader[step][split], None)
         assert x != None, "get x error"
         return x
     
@@ -370,9 +378,9 @@ class Trainer(object):
         return_metric = dict()
 
         # ! 数据调用
-        x = self.get_batch(split="train", shuffle=self.shuffle)
+        # x = self.get_batch(step="translate", split="train", shuffle=self.shuffle)
 
-        loss, return_metric = train_steps_fn(self.model, x)
+        loss, return_metric = train_steps_fn(self.model)
 
         return loss, return_metric
 
@@ -408,7 +416,7 @@ class Trainer(object):
                 # eval step
                 if self.update_step % self.eval_step == 0:
                     metrics = evaluate_step_fn(self.model, self.tokenizer,
-                                          self.datasets.get("dev", None), self.batch_size,
+                                          self.datasets["translate"].get("dev", None), self.batch_size,
                                           self.num_beams, self.max_length, self.metrics,
                                           split="dev", output_dir=self.saved_dir)
                     metrics["tag"] = "dev"
@@ -441,7 +449,7 @@ class Trainer(object):
             self.label_smoother = None
 
         # 设置参数
-        self.epoch_size = len(self.data_loader["train"])        # 有多少个批次，不是更新步数
+        self.epoch_size = len(self.data_loader["translate"]["train"])        # 有多少个批次，不是更新步数
         each_epoch_num_uptate = self.epoch_size // self.accumulation
         each_epoch_num_uptate = each_epoch_num_uptate + 1 if self.epoch_size % self.accumulation != 0 else each_epoch_num_uptate
 
@@ -464,7 +472,7 @@ class Trainer(object):
             scaler = GradScaler()
             p_bar = tqdm(total=self.max_step)                          ## TODO
             for epoch in range(self.num_epoch):
-                logger.info(f"第 {epoch} 个epoch训练完毕")
+                logger.info(f"第 {epoch} 个epoch训练开始")
                 self.train_epoch_amp(scaler, train_steps_fn, p_bar, evaluate_fn)
                 ## ! 训练结束
                 if self.update_step >= self.max_step:

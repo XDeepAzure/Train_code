@@ -9,3 +9,5 @@
 ./data/public_data
 ./data/public_data/train/mono/train.nl
 ./data/public_data/train/mono/train.zh
+data/public_data/train/pair/train.nl
+data/public_data/train/pair/train.zh

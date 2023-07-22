@@ -10,7 +10,8 @@ from .data_process import (get_tokenized_datasets,
 
 from .model import PureM2M100, PureFFN
 
-from .trainer import Trainer, distill_dec_step, distill_enc_step, teacher_forward, translate_step
+from .trainer import (Trainer, distill_dec_step, distill_enc_step,
+                      teacher_forward, translate_step, denoising_step)
 
 from .train_args import parse_args
 
