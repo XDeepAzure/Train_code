@@ -103,9 +103,10 @@ def get_DatasetDict(data_dir, src_lang, tgt_lang, src_file, tgt_file, denoising_
     # if bi:
     #     data_dict["dev"][f"{tgt_lang}-{src_lang}"] = test   
     data_dict = dict()
-    translate_dataset = load_translate_datasets(data_dir=data_dir, src_lang=src_lang, tgt_lang=tgt_lang,
+    if STEPS[0] in steps:
+        translate_dataset = load_translate_datasets(data_dir=data_dir, src_lang=src_lang, tgt_lang=tgt_lang,
                 src_file=src_file, tgt_file=tgt_file, tokenizer=tokenizer, max_length=max_length, batch_size=batch_size, bi=bi)
-    data_dict[STEPS[0]] = translate_dataset
+        data_dict[STEPS[0]] = translate_dataset
 
     if STEPS[1] in steps:
         denoising = {}
