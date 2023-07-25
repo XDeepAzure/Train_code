@@ -339,7 +339,7 @@ def random_spans_noise_mask(noise_density, mean_noise_span_length, length):
 
         return is_noise[:orig_length]
 
-def add_span_mask_noise(vocab_size, item, noise_density=0.15, mean_noise_span_length=3):
+def add_span_mask_noise(vocab_size, item, noise_density=0.3, mean_noise_span_length=3):
     noise_mask = random_spans_noise_mask(noise_density, mean_noise_span_length, len(item))
 
     source_sentinel_ids = create_sentinel_ids(noise_mask.astype(np.int8), vocab_size)
