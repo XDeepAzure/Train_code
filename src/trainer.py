@@ -366,7 +366,7 @@ class Trainer(object):
         return_metrics = {"translate_loss": outputs["loss"].item() if isinstance(outputs, dict) else outputs.loss.item()}
         if self.label_smoother:
             loss = self.label_smoother(outputs, labels, shift_labels=shift_labels)
-            if hasattr(outputs, loss):
+            if hasattr(outputs, "loss"):
                 outputs.loss = loss
             else:
                 outputs["loss"] = loss
