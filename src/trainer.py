@@ -28,7 +28,7 @@ logger = getLogger()
 
 
 OPTIMIZER = ("AdamW", "SGD")
-STRATEGY = ("steps", "epoch")
+STRATEGY = ("steps", "epoch", "no")
 
 
 def avg(x):
@@ -166,7 +166,8 @@ class Trainer(object):
         self.eval_strategy = eval_strategy
 
         self.log_step = log_step
-        assert save_step % eval_step == 0, ""               # 此条件必须成立
+        if self.eval_strategy != STRATEGY[2]:
+            assert save_step % eval_step == 0, ""               # 此条件必须成立
         self.eval_step = eval_step
         self.save_step = save_step
 
@@ -447,11 +448,11 @@ class Trainer(object):
                     metrics["epoch"] = self.update_step / eval_update_num_epoch
                     metrics["lr"] = self.optimizer.param_groups[0]['lr']
                     self.log_metric(metrics=metrics,step=self.update_step)
-                    
+                
                 # eval step
                 if self.update_step % self.eval_step == 0:
                     metrics = evaluate_step_fn(self.model, self.tokenizer,
-                                          self.datasets["translate"].get("dev", None), self.batch_size,
+                                          self.datasets, self.batch_size,
                                           self.num_beams, self.max_length, self.metrics,
                                           split="dev", output_dir=self.saved_dir)
                     metrics["tag"] = "dev"
@@ -460,7 +461,10 @@ class Trainer(object):
                             v.train()                  
                 ## ! 要改
                 if self.update_step!=0 and (self.update_step % self.save_step == 0):
-                    self.save_best_chpk(metrics)
+                    if self.eval_strategy == STRATEGY[2]:
+                        self.save_checkpoint(f"{self.saved_dir}/chpk-{self.update_step}")
+                    else:
+                        self.save_best_chpk(metrics)
         pass
 
     def train_end(self, epoch):
@@ -468,6 +472,8 @@ class Trainer(object):
         #                         metric_dict={self.metrics[0]: self.best_model["metric"]})
         logger.critical(f"训练结束，第{epoch} epoch {self.update_step} step 结束")
         logger.critical(f"best model is {self.best_model}")
+        if len(self.best_model) < 1:
+            self.save_checkpoint(path = f"{self.saved_dir}/chpk-{self.update_step}")
 
     def train(self, train_steps_fn, datasets, evaluate_fn=None, shuffle=True):
         """
@@ -484,7 +490,7 @@ class Trainer(object):
             self.label_smoother = None
 
         # 设置参数
-        self.epoch_size = len(self.data_loader["translate"]["train"])        # 有多少个批次，不是更新步数
+        self.epoch_size = len(self.data_loader["denoising"]["nl_XX"])        # 有多少个批次，不是更新步数
         each_epoch_num_uptate = self.epoch_size // self.accumulation
         each_epoch_num_uptate = each_epoch_num_uptate + 1 if self.epoch_size % self.accumulation != 0 else each_epoch_num_uptate
 
@@ -498,11 +504,9 @@ class Trainer(object):
         if self.eval_strategy == STRATEGY[1]:
             self.eval_step = self.eval_step * each_epoch_num_uptate
             self.save_step = self.save_step * each_epoch_num_uptate
+        elif self.eval_strategy == STRATEGY[2]:
+            self.eval_step = self.max_step + 1
         self.update_step = 0
-
-        # for k in dir(self):
-        #     if not k.startswith("_") or not callable(getattr(self, k, None)):
-        #         logger.info(f"{k} {getattr(self, k, None)}")
         
         if self.amp == True:
             scaler = GradScaler()

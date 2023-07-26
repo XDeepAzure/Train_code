@@ -13,6 +13,7 @@
 data/public_data/train/pair/train.nl
 data/public_data/train/pair/train.zh
 data/public_data/train/pair/nl_XX-zh_CN/train/data-00000-of-00001.arrow
+/fasttext
 
 ./src/__pycache__
 *.pyc

@@ -1,8 +1,5 @@
 import os
-from typing import Optional, Tuple, Union
 import torch
-import torch.nn as nn
-from functools import partial
 from datasets import load_from_disk, DatasetDict, Dataset
 
 from transformers import (AutoModelForSeq2SeqLM,
@@ -74,34 +71,6 @@ def model_tocuda(teacher_model, student_model, ffn_model):
 
 def get_DatasetDict(data_dir, src_lang, tgt_lang, src_file, tgt_file, denoising_file, denoising_langs,
                     steps, tokenizer, max_length, batch_size, bi=False) -> DatasetDict:
-    # if bi:                                                                     # 是不是用的双向翻译模型
-    #     if not os.path.exists(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}")):
-    #         trans_para = get_paras_from_file(os.path.join(data_dir, src_file[0]), os.path.join(data_dir, tgt_file[0]))
-    #         data = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=src_lang, tgt_lang=tgt_lang,
-    #                                       max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
-    #         data1 = data["train"].to_dict()
-    #         trans_para = get_paras_from_file(os.path.join(data_dir, tgt_file[0]), os.path.join(data_dir, src_file[0]))
-    #         data = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=tgt_lang, tgt_lang=src_lang,
-    #                                       max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
-    #         data = {k: v+data1[k] for k, v in data["train"].to_dict().items()}
-    #         data_dict = DatasetDict({"train": Dataset.from_dict(data)})
-    #         data_dict.save_to_disk(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}"))
-    #     else:
-    #         data_dict = load_from_disk(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}"))
-    # else:
-    #     if not os.path.exists(os.path.join(data_dir, f"{src_lang}-{tgt_lang}")):
-    #         trans_para = get_paras_from_file(os.path.join(data_dir, src_file[0]), os.path.join(data_dir, tgt_file[0]))
-    #         data_dict = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=src_lang, tgt_lang=tgt_lang,
-    #                                       max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
-    #         data_dict.save_to_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
-    #     else:
-    #         data_dict = load_from_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
-    
-    # test = Dataset.load_from_disk("/data/hyxu/lowMT_compute/data/public_data/dev_set")
-
-    # data_dict["dev"] = {f"{src_lang}-{tgt_lang}": test}
-    # if bi:
-    #     data_dict["dev"][f"{tgt_lang}-{src_lang}"] = test   
     data_dict = dict()
     if STEPS[0] in steps:
         translate_dataset = load_translate_datasets(data_dir=data_dir, src_lang=src_lang, tgt_lang=tgt_lang,
@@ -115,22 +84,43 @@ def get_DatasetDict(data_dir, src_lang, tgt_lang, src_file, tgt_file, denoising_
                                                         tokenizer=tokenizer, max_length=max_length, batch_size=batch_size)
             denoising[lang] = denoising_dataset
         data_dict[STEPS[1]]  = denoising
+        pass
 
     return data_dict
 
-def evaluate_(model, tokenizer, data=None, batch_size=32, num_beams=4,
+def evaluate_(model, tokenizer, dataset=None, batch_size=32, num_beams=4,
                   max_length=128, metrics=["chrf"], split="test", output_dir=None, save_text=False):
     avg_scores = []
     return_metrics = dict()
     logger.info("==============evaluate begin===============")
-    for k, v in data.items():
-        s, t = k.split("-")
-        outputs = evaluate_fn(model["model"], tokenizer, s, t, {s:v[s], t:v[t]}, batch_size=batch_size, num_beams=num_beams, max_length=max_length,
-                    metrics=metrics)
-        outputs = outputs[0]
-        for m, s in outputs.items():
-            return_metrics[f"{k}/{m}"] = s
-        avg_scores.append(outputs[metrics[0]])
+    steps = dataset.keys()
+    if STEPS[0] in steps:
+        data = dataset[STEPS[0]]["dev"]
+        for k, v in data.items():
+            s, t = k.split("-")
+            outputs = evaluate_fn(model["model"], tokenizer, s, t, {s:v[s], t:v[t]}, batch_size=batch_size, num_beams=num_beams, max_length=max_length,
+                        metrics=metrics)
+            outputs = outputs[0]
+            for m, s in outputs.items():
+                return_metrics[f"{k}/{m}"] = s
+            avg_scores.append(outputs[metrics[0]])
+    if STEPS[1] in steps:
+        # data = dataset[1]["dev"]
+        data = dict()
+        def _read(p):
+            with open(p) as f:
+                d = f.readlines()
+            return [s.strip("\n") for s in d]
+        stences = _read("/data/hyxu/lowMT_compute/data/public_data/train/pair/valid.nl-zh.nl")
+        # data["nl_XX"] = 
+        data["zh_CN"] = _read("/data/hyxu/lowMT_compute/data/public_data/train/pair/valid.nl-zh.zh")
+        for k, v in data.items():
+            outputs = evaluate_fn(model["model"], tokenizer, s, t, {s:v[s], t:v[t]}, batch_size=batch_size, num_beams=num_beams, max_length=max_length,
+                        metrics=metrics)
+            outputs = outputs[0]
+            for m, s in outputs.items():
+                return_metrics[f"{k}/{m}"] = s
+            avg_scores.append(outputs[metrics[0]])
     return_metrics[f"avg_{metrics[0]}"] = sum(avg_scores) / len(avg_scores)
     logger.info(return_metrics)
     return return_metrics
