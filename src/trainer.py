@@ -31,7 +31,6 @@ OPTIMIZER = ("AdamW", "SGD")
 STRATEGY = ("steps", "epoch", "no")
 STEPS = ("translate", "denoising", "enc", "dec", "enc-dec", "dec_noise")
 
-
 def avg(x):
     # # assert isinstance(x[0], int)
     return sum(x) / len(x)

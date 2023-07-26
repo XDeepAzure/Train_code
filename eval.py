@@ -33,7 +33,7 @@ def get_compute_metric_fn(metrics):
         from sacrebleu import CHRF
         chrf = CHRF(word_order=2)
         compute_fn["chrf"] = chrf.corpus_score
-    if "bleu" in metrics:
+    if "bleu" in metrics:                               # 指定tokenizer为"char"
         from sacrebleu import BLEU
         bleu = BLEU(tokenize="char")
         compute_fn["bleu"] = bleu.corpus_score
