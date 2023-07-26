@@ -28,7 +28,7 @@ logger = getLogger()
 
 OPTIMIZER = ("AdamW", "SGD")
 STRATEGY = ("steps", "epoch", "no")
-
+STEPS = ("translate", "denoising", "enc", "dec", "enc-dec", "dec_noise")
 
 def avg(x):
     # # assert isinstance(x[0], int)
@@ -455,7 +455,8 @@ class Trainer(object):
             self.label_smoother = None
 
         # 设置参数
-        self.epoch_size = len(self.data_loader["denoising"]["nl_XX"])        # 有多少个批次，不是更新步数
+        self.epoch_size = len(self.data_loader[STEPS[0]]["train"]) if STEPS[0] in self.data_loader \
+                            else len(self.data_loader[STEPS[1]]["nl_XX"])
         each_epoch_num_uptate = self.epoch_size // self.accumulation
         each_epoch_num_uptate = each_epoch_num_uptate + 1 if self.epoch_size % self.accumulation != 0 else each_epoch_num_uptate
 
