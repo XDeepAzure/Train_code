@@ -1,5 +1,9 @@
 
+<<<<<<< Updated upstream
 CUDA_VISIBLE_DEVICES="1"  python3 ./train.py \
+=======
+CUDA_VISIBLE_DEVICES="2"  python3 ./train.py \
+>>>>>>> Stashed changes
     --src_lang nl_XX \
     --tgt_lang zh_CN \
     --bi false  \
@@ -12,8 +16,8 @@ CUDA_VISIBLE_DEVICES="1"  python3 ./train.py \
     --accumulation 4 \
     --max_norm 2 \
     --max_length 128   \
-    --src_file 'train.nl'   \
-    --tgt_file 'train.zh'   \
+    --src_file 'train.nl-zh.nl'   \
+    --tgt_file 'train.nl-zh.zh'   \
     --denoising_langs "nl_XX,zh_CN" \
     --denoising_file "train.nl,train.zh"  \
     --train_strategy epoch \
@@ -21,6 +25,7 @@ CUDA_VISIBLE_DEVICES="1"  python3 ./train.py \
     --eval_step 1 \
     --save_step 1 \
     --log_step  400 \
+<<<<<<< Updated upstream
     --num_epoch 15 \
     --warmup_steps 0 \
     --steps "translate" \
@@ -31,4 +36,15 @@ CUDA_VISIBLE_DEVICES="1"  python3 ./train.py \
     --data_dir /data/hyxu/codes/lowMT_compute/data/public_data/train/pair \
     --name 'ft-clean'     \
 # nohup ./train.sh > ./log/ft_clean.log 2>&1 &
+=======
+    --num_epoch 20 \
+    --warmup_steps 0 \
+    --steps "translate" \
+    --w_noise 1 \
+    --optimer adamw \
+    --metrics 'bleu,'\
+    --data_dir /data/hyxu/lowMT_compute/data/public_data/train/pair \
+    --name 'ft'     \
+# nohup ./train.sh > ./log/ft.log 2>&1 &
+>>>>>>> Stashed changes
 # bsub -n 1 -q HPC.S1.GPU.X795.suda -o ./log/train_mbart50.log -gpu  num=1:mode=exclusive_process sh ./src/nmt_train.sh
