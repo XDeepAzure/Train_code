@@ -108,6 +108,15 @@ def parse_args():
         "--w_noise", type=str, default=1, help="各种任务的权重与steps对应的"
     )
     parser.add_argument(
+        "--delta", type=float, default=0.5, help="抗噪学些的超参"
+    )
+    parser.add_argument(
+        "--beta", type=float, default=0.8, help="抗噪学些的超参，当beta为0的时候就不开启抗噪学习"
+    )
+    parser.add_argument(
+        "--alpha", type=float, default=1, help="抗噪学些的超参"
+    )
+    parser.add_argument(
         "--max_step", type=int, default=2000
     )
     parser.add_argument(
