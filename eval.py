@@ -35,7 +35,7 @@ def get_compute_metric_fn(metrics):
         compute_fn["chrf"] = chrf.corpus_score
     if "bleu" in metrics:
         from sacrebleu import BLEU
-        bleu = BLEU()
+        bleu = BLEU(tokenize="char")
         compute_fn["bleu"] = bleu.corpus_score
     return compute_fn
 

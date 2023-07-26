@@ -162,7 +162,7 @@ def main(args):
         if STEPS[0] in args.steps:
             x = trainer.get_batch(STEPS[0], "train", trainer.shuffle)
             translate_output = translate_step(model["model"], x)
-            outputs = trainer.label_smooth_step(outputs=translate_output, labels=x["labels"], shift_labels=False)
+            outputs = trainer.post_step(outputs=translate_output, labels=x["labels"])
             step_outputs.append(outputs)
         if STEPS[1] in args.steps:
             for lang in args.denoising_langs:

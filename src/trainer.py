@@ -16,7 +16,8 @@ from torch.cuda.amp import GradScaler
 import torch.nn as nn
 import pytorch_warmup as warmup
 
-from src.model import PureFFN
+from src.loss import In_trust_Loss
+
 from transformers.models.m2m_100.modeling_m2m_100 import M2M100Encoder, M2M100Model, shift_tokens_right
 
 from torch.utils.tensorboard import SummaryWriter
@@ -145,7 +146,8 @@ class Trainer(object):
                  batch_size=32, seed=10, saved_dir="./", shuffle=True, datasets=None,
                  train_strategy=STRATEGY[0], eval_strategy=STRATEGY[0], save_step=1, eval_step=1, log_step=100,
                  num_epoch=3, max_step=10000, metrics=["chrf"], amp=True, optimizer=OPTIMIZER[0], lr=2e-5,
-                 weight_decay=0.01, save_num=3, label_smoothing_factor=0, warmup_steps=2000) -> None:
+                 weight_decay=0.01, save_num=3, label_smoothing_factor=0, warmup_steps=2000,
+                 alpha=1, beta=0, delta=0.5) -> None:
 
         # self.optimizer                                    # 默认optimizer是adamw
         # self.check_params(args)
@@ -189,6 +191,10 @@ class Trainer(object):
         assert optimizer in OPTIMIZER
         self.optimizer = optimizer
         self.warmup_steps = warmup_steps
+
+        self.alpha = alpha                      # 是否降噪学习的loss
+        self.beta = beta                        # 若不为0 则为开启
+        self.delta = delta  
         
         self.parameters = None
         self.best_model = []
@@ -373,6 +379,35 @@ class Trainer(object):
         return_metrics["loss"] = outputs.loss if hasattr(outputs, "loss") else outputs["loss"]
         return return_metrics
 
+    def _create_Intrust_loss(self):
+        if 1 > self.beta > 0:
+            assert self.label_smoother == None, "label smooth 不能与 in trust loss 同时用"
+            logger.critical("使用抗噪学习的loss")
+            self.in_truct_loss = In_trust_Loss(alpha=self.alpha, beta=self.beta, delta=self.delta,
+                                               num_classes=self.tokenizer.vocab_size)
+        else:
+            self.in_truct_loss = None
+            pass
+    
+    def in_trust_loss_step(self, outputs, labels):
+        """抗噪loss"""
+        return_metrics = {"translate_loss": outputs.loss.item()}
+        if self.in_trust_Loss:
+            logits = outputs.logits.view(-1, self.in_truct_loss.num_classes), 
+            labels = labels.view(-1)
+            loss = self.in_truct_loss(logits, labels)
+            outputs.loss = loss
+        else:
+            pass
+        return_metrics["loss"] = outputs.loss
+        return return_metrics
+
+    def post_step(self, outputs, labels):
+        if self.label_smoother:
+            return self.label_smooth_step(outputs, labels, shift_labels=False)
+        else:
+            return self.in_trust_loss_step(outputs, labels)
+
     def train_step(self, train_steps_fn):
         loss = None                     # total loss
         return_metric = dict()
@@ -453,6 +488,7 @@ class Trainer(object):
         each_epoch_num_uptate = self.epoch_size // self.accumulation
         each_epoch_num_uptate = each_epoch_num_uptate + 1 if self.epoch_size % self.accumulation != 0 else each_epoch_num_uptate
 
+        self._create_Intrust_loss()
         self.writer = SummaryWriter(self.saved_dir)         # 记录
         self.init_optimizer()
         self.create_lr_scheduler()
