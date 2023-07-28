@@ -105,22 +105,23 @@ def evaluate_(model, tokenizer, dataset=None, batch_size=32, num_beams=4,
                 return_metrics[f"{k}/{m}"] = s
             avg_scores.append(outputs[metrics[0]])
     if STEPS[1] in steps:
-        # data = dataset[1]["dev"]
-        data = dict()
-        def _read(p):
-            with open(p) as f:
-                d = f.readlines()
-            return [s.strip("\n") for s in d]
-        stences = _read("/data/hyxu/lowMT_compute/data/public_data/train/pair/valid.nl-zh.nl")
-        # data["nl_XX"] = 
-        data["zh_CN"] = _read("/data/hyxu/lowMT_compute/data/public_data/train/pair/valid.nl-zh.zh")
-        for k, v in data.items():
-            outputs = evaluate_fn(model["model"], tokenizer, s, t, {s:v[s], t:v[t]}, batch_size=batch_size, num_beams=num_beams, max_length=max_length,
-                        metrics=metrics)
-            outputs = outputs[0]
-            for m, s in outputs.items():
-                return_metrics[f"{k}/{m}"] = s
-            avg_scores.append(outputs[metrics[0]])
+        # # data = dataset[1]["dev"]
+        # data = dict()
+        # def _read(p):
+        #     with open(p) as f:
+        #         d = f.readlines()
+        #     return [s.strip("\n") for s in d]
+        # stences = _read("/data/hyxu/lowMT_compute/data/public_data/train/pair/valid.nl-zh.nl")
+        # # data["nl_XX"] = 
+        # data["zh_CN"] = _read("/data/hyxu/lowMT_compute/data/public_data/train/pair/valid.nl-zh.zh")
+        # for k, v in data.items():
+        #     outputs = evaluate_fn(model["model"], tokenizer, s, t, {s:v[s], t:v[t]}, batch_size=batch_size, num_beams=num_beams, max_length=max_length,
+        #                 metrics=metrics)
+        #     outputs = outputs[0]
+        #     for m, s in outputs.items():
+        #         return_metrics[f"{k}/{m}"] = s
+        #     avg_scores.append(outputs[metrics[0]])
+        pass
     return_metrics[f"avg_{metrics[0]}"] = sum(avg_scores) / len(avg_scores)
     logger.info(return_metrics)
     return return_metrics

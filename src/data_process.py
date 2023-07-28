@@ -164,7 +164,7 @@ def load_translate_datasets(data_dir, src_lang, tgt_lang, src_file, tgt_file, to
             data_dict.save_to_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
         else:
             data_dict = load_from_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
-    test = Dataset.load_from_disk("/data/hyxu/codes/lowMT_compute/data/public_data/dev_set")
+    test = Dataset.load_from_disk("/data/hyxu/lowMT_compute/data/public_data/dev_set")
     data_dict["dev"] = {f"{src_lang}-{tgt_lang}": test}
     if bi:
         data_dict["dev"][f"{tgt_lang}-{src_lang}"] = test
@@ -339,7 +339,7 @@ def random_spans_noise_mask(noise_density, mean_noise_span_length, length):
 
         return is_noise[:orig_length]
 
-def add_span_mask_noise(vocab_size, item, noise_density=0.3, mean_noise_span_length=3):
+def add_span_mask_noise(vocab_size, item, noise_density=0.1, mean_noise_span_length=1):
     noise_mask = random_spans_noise_mask(noise_density, mean_noise_span_length, len(item))
 
     source_sentinel_ids = create_sentinel_ids(noise_mask.astype(np.int8), vocab_size)

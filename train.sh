@@ -3,9 +3,9 @@ CUDA_VISIBLE_DEVICES="2"  python3 ./train.py \
     --src_lang nl_XX \
     --tgt_lang zh_CN \
     --bi false  \
-    --student_path /data/hyxu/codes/cache_dir/mbart-large-cc25 \
+    --student_path /data/hyxu/cached_dir/mbart-large-cc25 \
     --num_beams 5 \
-    --saved_dir /data/hyxu/codes/lowMT_compute/model \
+    --saved_dir /data/hyxu/lowMT_compute/model \
     --label_smoothing_factor 0 \
     --lr 2e-5 \
     --batch_size 16 \
@@ -15,7 +15,7 @@ CUDA_VISIBLE_DEVICES="2"  python3 ./train.py \
     --src_file 'train.nl-zh.nl'   \
     --tgt_file 'train.nl-zh.zh'   \
     --denoising_langs "nl_XX,zh_CN" \
-    --denoising_file "train.nl,train.zh"  \
+    --denoising_file "clean.train.nl-zh.nl,clean.train.nl-zh.zh"  \
     --train_strategy epoch \
     --eval_strategy steps \
     --eval_step 2000 \

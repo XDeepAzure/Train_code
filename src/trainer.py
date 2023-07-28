@@ -393,7 +393,7 @@ class Trainer(object):
     def in_trust_loss_step(self, outputs, labels):
         """抗噪loss"""
         return_metrics = {"translate_loss": outputs.loss.item()}
-        if self.in_trust_Loss:
+        if self.in_truct_loss:
             logits = outputs.logits.view(-1, self.in_truct_loss.num_classes), 
             labels = labels.view(-1)
             loss = self.in_truct_loss(logits, labels)
@@ -406,8 +406,10 @@ class Trainer(object):
     def post_step(self, outputs, labels):
         if self.label_smoother:
             return self.label_smooth_step(outputs, labels, shift_labels=False)
-        else:
+        elif self.in_truct_loss:
             return self.in_trust_loss_step(outputs, labels)
+        else:
+            return {"loss": outputs["loss"], "translate_loss": outputs["loss"].item()}
 
     def train_step(self, train_steps_fn):
         loss = None                     # total loss
