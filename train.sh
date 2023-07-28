@@ -3,9 +3,9 @@ CUDA_VISIBLE_DEVICES="2"  python3 ./train.py \
     --src_lang nl_XX \
     --tgt_lang zh_CN \
     --bi false  \
-    --student_path /data/hyxu/codes/cache_dir/mbart-large-cc25 \
+    --student_path /data/hyxu/cache_dir/mbart-large-cc25 \
     --num_beams 5 \
-    --saved_dir /data/hyxu/codes/lowMT_compute/model \
+    --saved_dir /data/hyxu/lowMT_compute/model \
     --label_smoothing_factor 0 \
     --lr 2e-5 \
     --batch_size 16 \
