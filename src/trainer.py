@@ -70,11 +70,11 @@ def evaluate_fn(model, tokenizer, data_loader, tgt_lang, num_beams=4, return_tex
     else:
         return {"chrf": chrf_score.score, "bleu": bleu_score.score}
 
-def translate_step(model, x):
+def translate_step(model, x, output_hidden_states=False):
     """ 翻译任务的步骤，包含 encoder_last_hidden_state,  decoder_hidden_states(12层)"""
     for k, v in x.items():
         x[k] = v.to(model.device)
-    outputs = model(**x, output_hidden_states=False)
+    outputs = model(**x, output_hidden_states=output_hidden_states)
     return {k: v for k, v in outputs.items()}
 
 def denoising_step(model, x, lang, w):
@@ -146,22 +146,67 @@ def dec_noise_step(model, teacher_outputs, student_outputs, attention_mask, w):
 
     # 方差
 
-def contrast_step(model, x, w):
+def tsda_step(model, outputs, inputs, w, mix_ratio=0.2, temperature=2):
+    """https://github.com/TARGET-SIDE-DATA-AUG/TSDASG/blob/main/fairseq/fairseq/models/transformer.py
+    数据增强策略
+    """
+    # import pdb;pdb.set_trace()
+    # shift right
+    x = outputs["logits"].clone()
+    length = len(x[0])
+    for idx in range(length - 1, -1, -1):
+        x[:,idx] = x[:,idx - 1]     
+            
+    # set the second index of logits as the maximum so that after softmax, the first token must be '2'
+    # The reason we set first token as '2' is that the first token of 'prev_output_tokens' is 2.
+    x[:,0, 2] = 2 * torch.max(x[:,0])   
+    x = F.softmax(x / temperature, dim = 2)
+
+    # mask pad, pad = 1. We found this is unnecessary.
+    #x = x.masked_fill(prev_output_tokens.eq(1),  1)
+    
+    # Make the output dimension the same as the input
+    with torch.no_grad():     
+        embed_matrix = model.model.decoder.embed_tokens.weight.clone()   # vocab_size * embed_lenghth (10152 * 512)        
+        decoder_in = torch.einsum('blv,ve->ble', x, embed_matrix) # batch * len * embed_lenghth
+        
+    # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
+    decoder_outputs = model.model.decoder(
+        inputs_embeds=decoder_in,
+        attention_mask=inputs["labels"] != -100,
+        encoder_hidden_states=outputs["encoder_last_hidden_state"],
+        encoder_attention_mask=inputs["attention_mask"],
+    )
+
+    logits = model.lm_head(decoder_outputs[0]) + model.final_logits_bias
+    
+    loss_fct = nn.CrossEntropyLoss()
+    loss2 = loss_fct(logits.view(-1, model.config.vocab_size), inputs["labels"].view(-1))
+        
+    # We use KL divergence here
+    P = F.log_softmax(logits,dim = 2)
+    Q = F.softmax(outputs["logits"], dim=2)
+    dk = F.kl_div(P, Q, reduction='sum')
+
+    loss_total_without_kd = loss2 * mix_ratio + dk
+    return {"loss": w * loss_total_without_kd, "tsda_loss": loss_total_without_kd.item()}
+
+
+def contrast_step(model, outputs, x, w):
     '''list_wise loss'''
-    ran_sampleNum = torch.arange(sample_num/2+1, 1, step=-0.25).to(sampled_input.device)[:sample_num+1].unsqueeze(0).repeat(batch_size, 1)  ## batch x samle_num
-    sample_probs = nn.Softmax(dim=-1)(ran_sampleNum)
-    cos_distance_probs = nn.Softmax(dim=-1)(cos_distance)
-    cl_loss = F.kl_div(cos_distance_probs.log(), sample_probs, reduction='batchmean')
-    ## way2
+
+    output_features = self.get_global_features(output_hidden_states)
+    label_features = self.get_global_features(label_hidden_states)
+        
+
     # 获取正例相似度和负例相似度
     pos_similarities = F.cosine_similarity(output_features, label_features,dim=-1)  #torch.Size([48, 1])
     neg_similarities = F.cosine_similarity(output_features.transpose(0,1), label_features,dim=-1)  #torch.Size([48, 48])
-
     # 计算对比损失函数
     temperature = 0.3  # InfoNCE损失函数的温度参数
     # cl_loss = -torch.mean(torch.log(torch.exp(pos_similarities/temperature) /  
     #                        torch.sum(torch.exp(neg_similarities/temperature))))
-        
+    
     logits = neg_similarities
     labels = torch.arange(len(label_features),device=label_features.device)
     cl_loss = F.cross_entropy(logits / temperature, labels)
@@ -457,8 +502,16 @@ class Trainer(object):
         eval_update_num_epoch = eval_update_num_epoch if self.epoch_size % self.accumulation == 0 else eval_update_num_epoch+1
         for step in range(self.epoch_size):
             with autocast():
-                loss, metrics = self.train_step(train_steps_fn)
+                outputs = self.train_step(train_steps_fn)
+                loss = 0
+                return_metrics = dict()
+                for m in outputs:
+                    loss += m.pop("loss")
+                    for k, v in m.items():
+                        if isinstance(v, float) or (isinstance(v, torch.tensor) and len(v.shape) == 1 and v.shape[0]==1):
+                            return_metrics[k] = v
                 loss = loss / self.accumulation             #
+            
             scaler.scale(loss).backward()
             
             if step % self.accumulation == 0 or step+1 == self.epoch_size:  # 一个epoch结束的时候

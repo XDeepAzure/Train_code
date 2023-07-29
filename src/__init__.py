@@ -11,10 +11,11 @@ from .data_process import (get_tokenized_datasets,
 from .model import PureM2M100, PureFFN
 
 from .trainer import (Trainer, distill_dec_step, distill_enc_step,
-                      teacher_forward, translate_step, denoising_step)
+                      teacher_forward, translate_step, denoising_step,
+                      tsda_step)
 
 from .train_args import parse_args
 
 # from .loss import In_trust_Loss
 
-STEPS = ("translate", "denoising", "enc", "dec", "enc-dec", "dec_noise")
+STEPS = ("translate", "denoising", "tsda", "enc", "dec", "enc-dec", "dec_noise")
