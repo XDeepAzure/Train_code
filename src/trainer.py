@@ -504,12 +504,12 @@ class Trainer(object):
             with autocast():
                 outputs = self.train_step(train_steps_fn)
                 loss = 0
-                return_metrics = dict()
+                metrics = dict()
                 for m in outputs:
                     loss += m.pop("loss")
                     for k, v in m.items():
                         if isinstance(v, float) or (isinstance(v, torch.tensor) and len(v.shape) == 1 and v.shape[0]==1):
-                            return_metrics[k] = v
+                            metrics[k] = v
                 loss = loss / self.accumulation             #
             
             scaler.scale(loss).backward()
