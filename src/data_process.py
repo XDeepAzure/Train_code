@@ -164,7 +164,7 @@ def load_translate_datasets(data_dir, src_lang, tgt_lang, src_file, tgt_file, to
                                           max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
             data_dict.save_to_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
         else:
-            data_dict = load_from_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
+            data_dict = load_from_disk(os.path.join(data_dir, f"{prefix}.{src_lang}-{tgt_lang}"))
     test = Dataset.load_from_disk("/data/hyxu/codes/lowMT_compute/data/public_data/dev_set")
     data_dict["dev"] = {f"{src_lang}-{tgt_lang}": test}
     if bi:

@@ -159,7 +159,7 @@ def main(args):
                 x = trainer.get_batch(STEPS[1], lang, trainer.shuffle)
                 outputs = denoising_step(model["model"], x, lang, args.w_noise)
                 step_outputs.append(outputs)
-        if STEPS[2]:
+        if STEPS[2] in args.steps:
             outputs = tsda_step(model["model"], translate_output, x, w=1)
             step_outputs.append(outputs)
 
