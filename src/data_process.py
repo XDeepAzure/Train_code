@@ -157,14 +157,15 @@ def load_translate_datasets(data_dir, src_lang, tgt_lang, src_file, tgt_file, to
         else:
             data_dict = load_from_disk(os.path.join(data_dir, f"both_{src_lang}_{tgt_lang}"))
     else:
-        if not os.path.exists(os.path.join(data_dir, f"{src_lang}-{tgt_lang}")):
+        prefix = src_file[0].split(".")[0]
+        if not os.path.exists(os.path.join(data_dir, f"{prefix}.{src_lang}-{tgt_lang}")):
             trans_para = get_paras_from_file(os.path.join(data_dir, src_file[0]), os.path.join(data_dir, tgt_file[0]))
             data_dict = get_tokenized_datasets(tokenizer=tokenizer, trans_para=trans_para, src_lang=src_lang, tgt_lang=tgt_lang,
                                           max_input_length=max_length, max_target_length=max_length, batch_size=batch_size)
             data_dict.save_to_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
         else:
-            data_dict = load_from_disk(os.path.join(data_dir, f"{src_lang}-{tgt_lang}"))
-    test = Dataset.load_from_disk("/data/hyxu/lowMT_compute/data/public_data/dev_set")
+            data_dict = load_from_disk(os.path.join(data_dir, f"{prefix}.{src_lang}-{tgt_lang}"))
+    test = Dataset.load_from_disk("/data/hyxu/codes/lowMT_compute/data/public_data/dev_set")
     data_dict["dev"] = {f"{src_lang}-{tgt_lang}": test}
     if bi:
         data_dict["dev"][f"{tgt_lang}-{src_lang}"] = test

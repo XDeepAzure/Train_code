@@ -9,7 +9,7 @@ from transformers.models.m2m_100.modeling_m2m_100 import M2M100Encoder, M2M100Mo
 from src.train_args import parse_args
 from src.utils import create_logger, setup_seed
 from src import (Trainer, STEPS, translate_step, denoising_step, 
-                 get_tokenized_datasets, get_paras_from_file,
+                 get_tokenized_datasets, get_paras_from_file, tsda_step,
                  load_translate_datasets, load_denoising_datasets)
 from eval import evaluate_both, evaluate_fn
 
@@ -148,11 +148,10 @@ def main(args):
                            tokenizer=tokenizer, max_length=args.max_length, batch_size=args.batch_size, bi=args.bi)
 
     def train_steps_fn(model):
-        loss = 0
         step_outputs = []
         if STEPS[0] in args.steps:
             x = trainer.get_batch(STEPS[0], "train", trainer.shuffle)
-            translate_output = translate_step(model["model"], x)
+            translate_output = translate_step(model["model"], x, output_hidden_states = STEPS[2] in args.steps)
             outputs = trainer.post_step(outputs=translate_output, labels=x["labels"])
             step_outputs.append(outputs)
         if STEPS[1] in args.steps:
@@ -160,14 +159,11 @@ def main(args):
                 x = trainer.get_batch(STEPS[1], lang, trainer.shuffle)
                 outputs = denoising_step(model["model"], x, lang, args.w_noise)
                 step_outputs.append(outputs)
-            pass
-        
-        return_metrics = dict()
-        for m in step_outputs:
-            loss += m.pop("loss")
-            for k, v in m.items():
-                return_metrics[k] = v
-        return loss, return_metrics
+        if STEPS[2] in args.steps:
+            outputs = tsda_step(model["model"], translate_output, x, w=1)
+            step_outputs.append(outputs)
+
+        return step_outputs
 
     trainer.train(train_steps_fn, data, evaluate_fn=evaluate_, shuffle=args.shuffle)
     pass

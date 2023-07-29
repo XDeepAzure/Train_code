@@ -14,6 +14,7 @@ from torch.cuda.amp import autocast as autocast
 from torch.cuda.amp import GradScaler
 
 import torch.nn as nn
+import torch.nn.functional as F
 import pytorch_warmup as warmup
 
 from src.loss import In_trust_Loss
@@ -69,11 +70,11 @@ def evaluate_fn(model, tokenizer, data_loader, tgt_lang, num_beams=4, return_tex
     else:
         return {"chrf": chrf_score.score, "bleu": bleu_score.score}
 
-def translate_step(model, x):
+def translate_step(model, x, output_hidden_states=False):
     """ 翻译任务的步骤，包含 encoder_last_hidden_state,  decoder_hidden_states(12层)"""
     for k, v in x.items():
         x[k] = v.to(model.device)
-    outputs = model(**x, output_hidden_states=False)
+    outputs = model(**x, output_hidden_states=output_hidden_states)
     return {k: v for k, v in outputs.items()}
 
 def denoising_step(model, x, lang, w):
@@ -82,6 +83,14 @@ def denoising_step(model, x, lang, w):
     outputs = model(**x, output_hidden_states=False)
     return {"loss": outputs.loss * w, f"{lang}_denoising_loss": outputs.loss.item()}
 
+def r_drop_step(model, x, w):
+    """对token粒度做不太好"""
+    feature = model.model.encoder(x["input_ids"], x["attention_mask"]) 
+    feature_2 = model.model.encoder(x["input_ids"], x["attention_mask"])
+    kl_loss1 = F.kl_div(F.log_softmax(feature, dim=-1), F.softmax(feature_2, dim=-1))
+    kl_loss2 = F.kl_div(F.log_softmax(feature_2, dim=-1), F.softmax(feature, dim=-1))
+    kl_loss = (kl_loss1 + kl_loss2) / 2
+    return {"loss": w * kl_loss, "r_drop_loss": kl_loss.item()}
 
 def teacher_forward(model, x, pad_token_id, decoder_start_token_id):
     """返回teacher的forward结果 包含encoder_last_hidden_state, last_hidden_state"""
@@ -137,8 +146,71 @@ def dec_noise_step(model, teacher_outputs, student_outputs, attention_mask, w):
 
     # 方差
 
+def tsda_step(model, outputs, inputs, w, mix_ratio=0.2, temperature=2):
+    """https://github.com/TARGET-SIDE-DATA-AUG/TSDASG/blob/main/fairseq/fairseq/models/transformer.py
+    数据增强策略
+    """
+    # import pdb;pdb.set_trace()
+    # shift right
+    x = outputs["logits"].clone()
+    length = len(x[0])
+    for idx in range(length - 1, -1, -1):
+        x[:,idx] = x[:,idx - 1]     
+            
+    # set the second index of logits as the maximum so that after softmax, the first token must be '2'
+    # The reason we set first token as '2' is that the first token of 'prev_output_tokens' is 2.
+    x[:,0, 2] = 2 * torch.max(x[:,0])   
+    x = F.softmax(x / temperature, dim = 2)
+
+    # mask pad, pad = 1. We found this is unnecessary.
+    #x = x.masked_fill(prev_output_tokens.eq(1),  1)
+    
+    # Make the output dimension the same as the input
+    with torch.no_grad():     
+        embed_matrix = model.model.decoder.embed_tokens.weight.clone()   # vocab_size * embed_lenghth (10152 * 512)        
+        decoder_in = torch.einsum('blv,ve->ble', x, embed_matrix) # batch * len * embed_lenghth
+        
+    # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
+    decoder_outputs = model.model.decoder(
+        inputs_embeds=decoder_in,
+        attention_mask=inputs["labels"] != -100,
+        encoder_hidden_states=outputs["encoder_last_hidden_state"],
+        encoder_attention_mask=inputs["attention_mask"],
+    )
+
+    logits = model.lm_head(decoder_outputs[0]) + model.final_logits_bias
+    
+    loss_fct = nn.CrossEntropyLoss()
+    loss2 = loss_fct(logits.view(-1, model.config.vocab_size), inputs["labels"].view(-1))
+        
+    # We use KL divergence here
+    P = F.log_softmax(logits,dim = 2)
+    Q = F.softmax(outputs["logits"], dim=2)
+    dk = F.kl_div(P, Q, reduction='sum')
+
+    loss_total_without_kd = loss2 * mix_ratio + dk
+    return {"loss": w * loss_total_without_kd, "tsda_loss": loss_total_without_kd.item()}
 
 
+def contrast_step(model, outputs, x, w):
+    '''list_wise loss'''
+
+    output_features = self.get_global_features(output_hidden_states)
+    label_features = self.get_global_features(label_hidden_states)
+        
+
+    # 获取正例相似度和负例相似度
+    pos_similarities = F.cosine_similarity(output_features, label_features,dim=-1)  #torch.Size([48, 1])
+    neg_similarities = F.cosine_similarity(output_features.transpose(0,1), label_features,dim=-1)  #torch.Size([48, 48])
+    # 计算对比损失函数
+    temperature = 0.3  # InfoNCE损失函数的温度参数
+    # cl_loss = -torch.mean(torch.log(torch.exp(pos_similarities/temperature) /  
+    #                        torch.sum(torch.exp(neg_similarities/temperature))))
+    
+    logits = neg_similarities
+    labels = torch.arange(len(label_features),device=label_features.device)
+    cl_loss = F.cross_entropy(logits / temperature, labels)
+    pass
 
 class Trainer(object):
 
@@ -392,15 +464,15 @@ class Trainer(object):
     
     def in_trust_loss_step(self, outputs, labels):
         """抗噪loss"""
-        return_metrics = {"translate_loss": outputs.loss.item()}
+        return_metrics = {"translate_loss": outputs["loss"].item()}
         if self.in_truct_loss:
-            logits = outputs.logits.view(-1, self.in_truct_loss.num_classes), 
+            logits = outputs["logits"].view(-1, self.in_truct_loss.num_classes) 
             labels = labels.view(-1)
             loss = self.in_truct_loss(logits, labels)
-            outputs.loss = loss
+            outputs["loss"] = loss
         else:
             pass
-        return_metrics["loss"] = outputs.loss
+        return_metrics["loss"] = outputs["loss"]
         return return_metrics
 
     def post_step(self, outputs, labels):
@@ -418,9 +490,9 @@ class Trainer(object):
         # ! 数据调用
         # x = self.get_batch(step="translate", split="train", shuffle=self.shuffle)
 
-        loss, return_metric = train_steps_fn(self.model)
+        outputs = train_steps_fn(self.model)
 
-        return loss, return_metric
+        return outputs
 
     def train_epoch_amp(self, scaler, train_steps_fn, p_bar, evaluate_step_fn=None):
         if evaluate_step_fn == None:
@@ -430,8 +502,16 @@ class Trainer(object):
         eval_update_num_epoch = eval_update_num_epoch if self.epoch_size % self.accumulation == 0 else eval_update_num_epoch+1
         for step in range(self.epoch_size):
             with autocast():
-                loss, metrics = self.train_step(train_steps_fn)
+                outputs = self.train_step(train_steps_fn)
+                loss = 0
+                metrics = dict()
+                for m in outputs:
+                    loss += m.pop("loss")
+                    for k, v in m.items():
+                        if isinstance(v, float) or (isinstance(v, torch.tensor) and len(v.shape) == 1 and v.shape[0]==1):
+                            metrics[k] = v
                 loss = loss / self.accumulation             #
+            
             scaler.scale(loss).backward()
             
             if step % self.accumulation == 0 or step+1 == self.epoch_size:  # 一个epoch结束的时候

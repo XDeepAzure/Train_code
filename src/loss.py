@@ -19,7 +19,10 @@ class In_trust_Loss(nn.Module):
         ce = self.cross_entropy(logits,labels)
         #Loss In_trust
         active_logits = logits.view(-1,self.num_classes)
-        active_labels = labels.view(-1)
+        active_labels = labels.clone()
+        # active_labels.requires_grad = False
+        active_labels[labels==-100] = 1
+        active_labels = active_labels.view(-1)
 
         pred = F.softmax(active_logits, dim=1)
         pred = torch.clamp(pred, min=1e-7, max=1.0)

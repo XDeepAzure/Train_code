@@ -27,7 +27,7 @@ logger = getLogger()
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
-def get_compute_metric_fn(metrics, tokenize=None):
+def get_compute_metric_fn(metrics, tokenzie):
     compute_fn = dict()
     if "chrf" in metrics:
         from sacrebleu import CHRF
@@ -35,13 +35,14 @@ def get_compute_metric_fn(metrics, tokenize=None):
         compute_fn["chrf"] = chrf.corpus_score
     if "bleu" in metrics:                               # 指定tokenizer为"char"
         from sacrebleu import BLEU
-        bleu = BLEU(tokenize="char") if tokenize else BLEU()
+        bleu = BLEU(tokenize=tokenzie) if tokenzie else BLEU()
         compute_fn["bleu"] = bleu.corpus_score
     return compute_fn
 
 def generate(model, tokenizer, src_lang, tgt_lang, src_data, batch_size=32, num_beams=4, max_length=128):
     num_batch = len(src_data) // batch_size if len(src_data) % batch_size == 0 else len(src_data) // batch_size +1
     predictions = []
+    model.eval()
     with torch.no_grad():
         for i in tqdm(range(num_batch)):
             x = tokenizer(src_data[i*batch_size:(i+1)*batch_size], padding=True, max_length=max_length, return_tensors="pt",truncation=True)
@@ -77,7 +78,7 @@ def evaluate_fn(model, tokenizer, src_lang, tgt_lang, data, batch_size=32, num_b
                            batch_size=batch_size, num_beams=num_beams, max_length=max_length)
     return_metrics = dict()
     tokenize = "char" if tgt_lang == "zh_CN" else None
-    for k, v in get_compute_metric_fn(metrics, tokenize=tokenize).items():
+    for k, v in get_compute_metric_fn(metrics, tokenize).items():
         return_metrics[k] = v(hypotheses=predictions, references=[references]).score
 
     return return_metrics, predictions, references
