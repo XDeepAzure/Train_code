@@ -14,6 +14,7 @@ from torch.cuda.amp import autocast as autocast
 from torch.cuda.amp import GradScaler
 
 import torch.nn as nn
+import torch.nn.functional as F
 import pytorch_warmup as warmup
 
 from src.loss import In_trust_Loss
@@ -82,6 +83,14 @@ def denoising_step(model, x, lang, w):
     outputs = model(**x, output_hidden_states=False)
     return {"loss": outputs.loss * w, f"{lang}_denoising_loss": outputs.loss.item()}
 
+def r_drop_step(model, x, w):
+    """对token粒度做不太好"""
+    feature = model.model.encoder(x["input_ids"], x["attention_mask"]) 
+    feature_2 = model.model.encoder(x["input_ids"], x["attention_mask"])
+    kl_loss1 = F.kl_div(F.log_softmax(feature, dim=-1), F.softmax(feature_2, dim=-1))
+    kl_loss2 = F.kl_div(F.log_softmax(feature_2, dim=-1), F.softmax(feature, dim=-1))
+    kl_loss = (kl_loss1 + kl_loss2) / 2
+    return {"loss": w * kl_loss, "r_drop_loss": kl_loss.item()}
 
 def teacher_forward(model, x, pad_token_id, decoder_start_token_id):
     """返回teacher的forward结果 包含encoder_last_hidden_state, last_hidden_state"""
@@ -137,8 +146,26 @@ def dec_noise_step(model, teacher_outputs, student_outputs, attention_mask, w):
 
     # 方差
 
+def contrast_step(model, x, w):
+    '''list_wise loss'''
+    ran_sampleNum = torch.arange(sample_num/2+1, 1, step=-0.25).to(sampled_input.device)[:sample_num+1].unsqueeze(0).repeat(batch_size, 1)  ## batch x samle_num
+    sample_probs = nn.Softmax(dim=-1)(ran_sampleNum)
+    cos_distance_probs = nn.Softmax(dim=-1)(cos_distance)
+    cl_loss = F.kl_div(cos_distance_probs.log(), sample_probs, reduction='batchmean')
+    ## way2
+    # 获取正例相似度和负例相似度
+    pos_similarities = F.cosine_similarity(output_features, label_features,dim=-1)  #torch.Size([48, 1])
+    neg_similarities = F.cosine_similarity(output_features.transpose(0,1), label_features,dim=-1)  #torch.Size([48, 48])
 
-
+    # 计算对比损失函数
+    temperature = 0.3  # InfoNCE损失函数的温度参数
+    # cl_loss = -torch.mean(torch.log(torch.exp(pos_similarities/temperature) /  
+    #                        torch.sum(torch.exp(neg_similarities/temperature))))
+        
+    logits = neg_similarities
+    labels = torch.arange(len(label_features),device=label_features.device)
+    cl_loss = F.cross_entropy(logits / temperature, labels)
+    pass
 
 class Trainer(object):
 
@@ -392,22 +419,24 @@ class Trainer(object):
     
     def in_trust_loss_step(self, outputs, labels):
         """抗噪loss"""
-        return_metrics = {"translate_loss": outputs.loss.item()}
-        if self.in_trust_Loss:
-            logits = outputs.logits.view(-1, self.in_truct_loss.num_classes), 
+        return_metrics = {"translate_loss": outputs["loss"].item()}
+        if self.in_truct_loss:
+            logits = outputs["logits"].view(-1, self.in_truct_loss.num_classes) 
             labels = labels.view(-1)
             loss = self.in_truct_loss(logits, labels)
-            outputs.loss = loss
+            outputs["loss"] = loss
         else:
             pass
-        return_metrics["loss"] = outputs.loss
+        return_metrics["loss"] = outputs["loss"]
         return return_metrics
 
     def post_step(self, outputs, labels):
         if self.label_smoother:
             return self.label_smooth_step(outputs, labels, shift_labels=False)
-        else:
+        elif self.in_truct_loss:
             return self.in_trust_loss_step(outputs, labels)
+        else:
+            return {"loss": outputs["loss"], "translate_loss": outputs["loss"].item()}
 
     def train_step(self, train_steps_fn):
         loss = None                     # total loss
