@@ -490,9 +490,9 @@ class Trainer(object):
         # ! 数据调用
         # x = self.get_batch(step="translate", split="train", shuffle=self.shuffle)
 
-        loss, return_metric = train_steps_fn(self.model)
+        outputs = train_steps_fn(self.model)
 
-        return loss, return_metric
+        return outputs
 
     def train_epoch_amp(self, scaler, train_steps_fn, p_bar, evaluate_step_fn=None):
         if evaluate_step_fn == None:
