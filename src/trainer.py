@@ -470,6 +470,7 @@ class Trainer(object):
             labels = labels.view(-1)
             loss = self.in_truct_loss(logits, labels)
             outputs["loss"] = loss
+            return_metrics["in_trust_loss"] = loss.item()
         else:
             pass
         return_metrics["loss"] = outputs["loss"]

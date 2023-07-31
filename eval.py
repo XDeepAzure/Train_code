@@ -53,7 +53,8 @@ def generate(model, tokenizer, src_lang, tgt_lang, src_data, batch_size=32, num_
                     outputs = model.generate(input_ids=x["input_ids"],
                                      attention_mask=x["attention_mask"],
                                      num_beams=num_beams,
-                                     decoder_start_token_id=tokenizer.lang_code_to_id[tgt_lang])            #mbart
+                                     decoder_start_token_id=tokenizer.lang_code_to_id[tgt_lang],
+                                     max_length=max_length)            #mbart
                 elif isinstance(model, M2M100ForConditionalGeneration):
                     outputs = model.generate(input_ids=x["input_ids"],
                                      attention_mask=x["attention_mask"],
