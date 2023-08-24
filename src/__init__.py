@@ -5,13 +5,17 @@ from .data_process import (get_tokenized_datasets,
                           get_datasets_from_flores,
                           get_translate_paras_from_file,
                           PureDataCollator,
-                          get_data_from_flore
+                          get_data_from_flore,load_translate_datasets, load_denoising_datasets
                           )
 
 from .model import PureM2M100, PureFFN
 
-from .trainer import Trainer, distill_dec_step, distill_enc_step, teacher_forward, translate_step
+from .trainer import (Trainer, distill_dec_step, distill_enc_step,
+                      teacher_forward, translate_step, denoising_step,
+                      tsda_step)
 
 from .train_args import parse_args
 
-STEPS = ("translate", "enc", "dec", "enc-dec", "dec_noise")
+# from .loss import In_trust_Loss
+
+STEPS = ("translate", "denoising", "tsda", "enc", "dec", "enc-dec", "dec_noise")

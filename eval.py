@@ -6,11 +6,15 @@ import torch
 # 自动混合精度
 
 from transformers import (M2M100ForConditionalGeneration,
+                          MBartForConditionalGeneration,
+                          AutoModelForSeq2SeqLM,
                           AutoTokenizer,
                           DataCollatorForSeq2Seq)
 
 from datasets import load_from_disk, DatasetDict
 from torch.utils.data import DataLoader
+
+from torch.cuda.amp import autocast as autocast
 
 import fire
 
@@ -23,43 +27,59 @@ logger = getLogger()
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
-def get_compute_metric_fn(metrics):
+def get_compute_metric_fn(metrics, tokenzie):
     compute_fn = dict()
     if "chrf" in metrics:
         from sacrebleu import CHRF
         chrf = CHRF(word_order=2)
         compute_fn["chrf"] = chrf.corpus_score
-    if "bleu" in metrics:
+    if "bleu" in metrics:                               # 指定tokenizer为"char"
         from sacrebleu import BLEU
-        bleu = BLEU()
+        bleu = BLEU(tokenize=tokenzie) if tokenzie else BLEU()
         compute_fn["bleu"] = bleu.corpus_score
     return compute_fn
+
+def generate(model, tokenizer, src_lang, tgt_lang, src_data, batch_size=32, num_beams=4, max_length=128):
+    num_batch = len(src_data) // batch_size if len(src_data) % batch_size == 0 else len(src_data) // batch_size +1
+    predictions = []
+    model.eval()
+    with torch.no_grad():
+        for i in tqdm(range(num_batch)):
+            x = tokenizer(src_data[i*batch_size:(i+1)*batch_size], padding=True, max_length=max_length, return_tensors="pt",truncation=True)
+            for k, v in x.items():
+                x[k] = v.to(model.device)
+            with autocast():
+                if isinstance(model, MBartForConditionalGeneration):
+                    outputs = model.generate(input_ids=x["input_ids"],
+                                     attention_mask=x["attention_mask"],
+                                     num_beams=num_beams,
+                                     decoder_start_token_id=tokenizer.lang_code_to_id[tgt_lang],
+                                     max_length=max_length)            #mbart
+                elif isinstance(model, M2M100ForConditionalGeneration):
+                    outputs = model.generate(input_ids=x["input_ids"],
+                                     attention_mask=x["attention_mask"],
+                                     num_beams=num_beams,
+                                     forced_bos_token_id=tokenizer.lang_code_to_id[tgt_lang])             #nllb
+            predictions += tokenizer.batch_decode(outputs.tolist(), skip_special_tokens=True)
+    return predictions
 
 def evaluate_fn(model, tokenizer, src_lang, tgt_lang, data, batch_size=32, num_beams=4, max_length=128, metrics=["chrf"]):
     """
     data = {src_lang: [], tgt_lang: []}
+    return {"bleu": 20, "chrf":30}, predictions, references
     """
     tokenizer.src_lang = src_lang
     tokenizer.tgt_lang = tgt_lang
     model.eval()
     if model.device == torch.device("cpu"):
         model = model.cuda()
-    with torch.no_grad():
-        predictions = []
-        references = data[tgt_lang]
-        num_batch = len(references) // batch_size if len(references) % batch_size == 0 else len(references) // batch_size +1
-        for i in tqdm(range(num_batch)):
-            x = tokenizer(data[src_lang][i*batch_size:(i+1)*batch_size], padding=True, max_length=max_length, return_tensors="pt",truncation=True)
-            for k, v in x.items():
-                x[k] = v.to(model.device)
-            outputs = model.generate(input_ids=x["input_ids"],
-                                     attention_mask=x["attention_mask"],
-                                     num_beams=num_beams,
-                                     forced_bos_token_id=tokenizer.lang_code_to_id[tgt_lang])
-            predictions += tokenizer.batch_decode(outputs.tolist(), skip_special_tokens=True)
-
+        
+    references = data[tgt_lang]
+    predictions = generate(model, tokenizer, src_lang, tgt_lang, data[src_lang],
+                           batch_size=batch_size, num_beams=num_beams, max_length=max_length)
     return_metrics = dict()
-    for k, v in get_compute_metric_fn(metrics).items():
+    tokenize = "char" if tgt_lang == "zh_CN" else None
+    for k, v in get_compute_metric_fn(metrics, tokenize).items():
         return_metrics[k] = v(hypotheses=predictions, references=[references]).score
 
     return return_metrics, predictions, references
@@ -193,37 +213,50 @@ def evaluate_both(model, tokenizer, data=None, batch_size=32, num_beams=4,
     return score
 
 
+def load_dataset(src_lang, tgt_lang, src_file, tgt_file, data_dir, test_dataset):
+    """return {"src_lang": [], "tgt_lang": []}"""
+    if test_dataset != "":
+        data = load_from_disk(os.path.join(data_dir, test_dataset))
+    else:
+        def _read_file(path):
+            with open(os.path.join(data_dir, path)) as f:
+                data = f.readlines()
+            return [s.rstrip("\n") for s in data]
+        data = {src_lang: _read_file(src_file), tgt_lang: _read_file(tgt_file)}
+    return data
+
+
 def main(model_path: str, src_lang:str, tgt_lang:str, src_file:str=None, tgt_file:str=None,
-         data_dir: str = None, seed=10, output_dir: str = None, metrics: str = "chrf,", multi_language: str = "to_en",
-         num_beams=4, max_length:int = 128, batch_size: int = 32, test_dataset: str = "flores", split="test", save_text=False):
+         data_dir: str = None, seed=235, output_dir: str = None, metrics: str = "bleu,",
+         num_beams=5, max_length:int = 128, batch_size: int = 32, test_dataset: str = "", split="test", save_text=False):
     # model_path = "/data/hyxu/cached_dir/nllb-200-distilled-600M"
 
     global logger
     output_dir = model_path if output_dir is None else output_dir
-    # import pdb;pdb.set_trace()
     metrics = [m for m in metrics if len(m) >= 1]
     setup_seed(seed)
 
-    log_name = f"{output_dir}/{multi_language}.log"
+    log_name = f"{output_dir}/eval.log"
     logger = create_logger(log_name)
     logger.info(f"procss is {os.getpid()}")
     logger.info(f"num_beams : {num_beams} max_length: {max_length}")
 
-    model = M2M100ForConditionalGeneration.from_pretrained(model_path).cuda()
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_path).cuda()
     tokenizer = AutoTokenizer.from_pretrained(model_path, src_lang=src_lang, tgt_lang=tgt_lang)
+    
+    data = load_dataset(src_lang, tgt_lang, src_file, tgt_file, data_dir, test_dataset)
 
-    if multi_language == "to_en":
-        metrics_socre = evaluate_to_en(output_dir, model, tokenizer, batch_size=batch_size,
-                                       num_beams=num_beams, max_length=max_length, metrics=metrics,
-                                       split=split, save_text=save_text)
-    elif multi_language == "from_en":
-        metrics_socre = evaluate_from_en(output_dir, model, tokenizer, batch_size=batch_size,
-                                       num_beams=num_beams, max_length=max_length, metrics=metrics,
-                                       split=split, save_text=save_text)
-    elif multi_language == "both":
-        metrics_socre = evaluate_both(model, tokenizer, batch_size=batch_size,
-                                       num_beams=num_beams, max_length=max_length, metrics=metrics,
-                                       split=split, output_dir=output_dir, save_text=save_text)
+    metrics_socre, predictions, references = evaluate_fn(model=model, tokenizer=tokenizer,
+                                src_lang=src_lang, tgt_lang=tgt_lang, data=data,
+                                batch_size=batch_size, num_beams=num_beams,
+                                max_length=max_length, metrics=metrics)
+    logger.info(metrics_socre)
+    if save_text:
+        with open(f"{output_dir}/predictions.txt", "w") as f:
+            f.writelines([s+"\n" for s in predictions])
+        with open(f"{output_dir}/references.txt", "w") as f:
+            f.writelines([s+"\n" for s in references])
+
     return metrics_socre
 
 

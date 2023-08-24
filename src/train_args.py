@@ -14,7 +14,7 @@ def parse_args():
         "--student_path", type=str, default="", help="student model 所在位置"
     )
     parser.add_argument(
-        "--teacher_path", type=str, default="", help="student model 所在位置"
+        "--bi", type=lambda x: x=="true", default=False, help="student model 所在位置"
     )
     parser.add_argument(
         "--max_length", type=int, default=256, help="训练中的句子最大长度"
@@ -49,6 +49,12 @@ def parse_args():
         "--tgt_file", type=str, default=""
     )
     parser.add_argument(
+        "--denoising_file", type=str, default=""
+    )
+    parser.add_argument(
+        "--denoising_langs", type=str, default=""
+    )
+    parser.add_argument(
         "--test_dataset", type=str, default="flores", help="在train和retrain里决定是否用flores的dev和test集"
     )
     ## !评估
@@ -69,7 +75,7 @@ def parse_args():
         "--optimer", type=str, default="adamw", help="优化器"
     )
     parser.add_argument(                        # 暂未实现
-        "--warmup_steps", type=int, default=100
+        "--warmup_steps", type=int, default=2000
     )
     parser.add_argument(
         "--lr", type=float, default=2e-5, help="训练baseline用的是2e-5, retrain用的是4e-6"
@@ -100,6 +106,15 @@ def parse_args():
     )
     parser.add_argument(
         "--w_noise", type=str, default=1, help="各种任务的权重与steps对应的"
+    )
+    parser.add_argument(
+        "--delta", type=float, default=0.5, help="抗噪学些的超参"
+    )
+    parser.add_argument(
+        "--beta", type=float, default=0.8, help="抗噪学些的超参，当beta为0的时候就不开启抗噪学习"
+    )
+    parser.add_argument(
+        "--alpha", type=float, default=1, help="抗噪学些的超参"
     )
     parser.add_argument(
         "--max_step", type=int, default=2000

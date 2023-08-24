@@ -1,19 +1,17 @@
 import os
-from typing import Optional, Tuple, Union
 import torch
-import torch.nn as nn
-from functools import partial
-from datasets import load_from_disk, DatasetDict
+from datasets import load_from_disk, DatasetDict, Dataset
 
-from transformers import (M2M100ForConditionalGeneration,
+from transformers import (AutoModelForSeq2SeqLM,
                         #   Seq2SeqLMOutput,
                           AutoTokenizer)
 from transformers.models.m2m_100.modeling_m2m_100 import M2M100Encoder, M2M100Model, shift_tokens_right
 from src.train_args import parse_args
 from src.utils import create_logger, setup_seed
-from src import (Trainer, PureFFN, STEPS,
-                distill_dec_step, distill_enc_step, teacher_forward, translate_step)
-from eval import evaluate_both
+from src import (Trainer, STEPS, translate_step, denoising_step, 
+                 get_tokenized_datasets, get_paras_from_file, tsda_step,
+                 load_translate_datasets, load_denoising_datasets)
+from eval import evaluate_both, evaluate_fn
 
 from logging import getLogger
 
@@ -26,6 +24,14 @@ def check_params(args):
     args.steps = [s for s in args.steps.split(",") if s in STEPS]
 
     args.saved_dir = os.path.join(args.saved_dir, args.name)
+    args.src_file = args.src_file.split(",")
+    args.tgt_file = args.tgt_file.split(",")
+    args.denoising_file = args.denoising_file.split(",")
+    args.denoising_langs = args.denoising_langs.split(",")
+    assert len(args.denoising_langs) == len(args.denoising_file)
+
+    args.w_noise = float(args.w_noise)
+
     if not os.path.exists(args.saved_dir):
         os.mkdir(args.saved_dir)
     global logger
@@ -63,60 +69,103 @@ def model_tocuda(teacher_model, student_model, ffn_model):
     student_model = student_model.to(device2)                                       # 学生放在第二张卡上
     return teacher_model, student_model, ffn_model
 
+def get_DatasetDict(data_dir, src_lang, tgt_lang, src_file, tgt_file, denoising_file, denoising_langs,
+                    steps, tokenizer, max_length, batch_size, bi=False) -> DatasetDict:
+    data_dict = dict()
+    if STEPS[0] in steps:
+        translate_dataset = load_translate_datasets(data_dir=data_dir, src_lang=src_lang, tgt_lang=tgt_lang,
+                src_file=src_file, tgt_file=tgt_file, tokenizer=tokenizer, max_length=max_length, batch_size=batch_size, bi=bi)
+        data_dict[STEPS[0]] = translate_dataset
+
+    if STEPS[1] in steps:
+        denoising = {}
+        for f_p, lang in zip(denoising_file, denoising_langs):
+            denoising_dataset = load_denoising_datasets(data_dir=data_dir, denoising_file=f_p, lang=lang,
+                                                        tokenizer=tokenizer, max_length=max_length, batch_size=batch_size)
+            denoising[lang] = denoising_dataset
+        data_dict[STEPS[1]]  = denoising
+        pass
+
+    return data_dict
+
+def evaluate_(model, tokenizer, dataset=None, batch_size=32, num_beams=4,
+                  max_length=128, metrics=["chrf"], split="test", output_dir=None, save_text=False):
+    avg_scores = []
+    return_metrics = dict()
+    logger.info("==============evaluate begin===============")
+    steps = dataset.keys()
+    if STEPS[0] in steps:
+        data = dataset[STEPS[0]]["dev"]
+        for k, v in data.items():
+            s, t = k.split("-")
+            outputs = evaluate_fn(model["model"], tokenizer, s, t, {s:v[s], t:v[t]}, batch_size=batch_size, num_beams=num_beams, max_length=max_length,
+                        metrics=metrics)
+            outputs = outputs[0]
+            for m, s in outputs.items():
+                return_metrics[f"{k}/{m}"] = s
+            avg_scores.append(outputs[metrics[0]])
+    if STEPS[1] in steps:
+        # # data = dataset[1]["dev"]
+        # data = dict()
+        # def _read(p):
+        #     with open(p) as f:
+        #         d = f.readlines()
+        #     return [s.strip("\n") for s in d]
+        # stences = _read("/data/hyxu/lowMT_compute/data/public_data/train/pair/valid.nl-zh.nl")
+        # # data["nl_XX"] = 
+        # data["zh_CN"] = _read("/data/hyxu/lowMT_compute/data/public_data/train/pair/valid.nl-zh.zh")
+        # for k, v in data.items():
+        #     outputs = evaluate_fn(model["model"], tokenizer, s, t, {s:v[s], t:v[t]}, batch_size=batch_size, num_beams=num_beams, max_length=max_length,
+        #                 metrics=metrics)
+        #     outputs = outputs[0]
+        #     for m, s in outputs.items():
+        #         return_metrics[f"{k}/{m}"] = s
+        #     avg_scores.append(outputs[metrics[0]])
+        pass
+    return_metrics[f"avg_{metrics[0]}"] = sum(avg_scores) / len(avg_scores)
+    logger.info(return_metrics)
+    return return_metrics
+        
+        
+
 def main(args):
     check_params(args)
     setup_seed(args.seed)
     
     trainer = get_trainer(args)
-
-    student = M2M100ForConditionalGeneration.from_pretrained(args.student_path)
-    # if len(args.steps) > 1
-    teacher = M2M100Model.from_pretrained(args.teacher_path)
-    for p in teacher.parameters():
-        p.requires_grad = False
-    
-    # ffn = PureFFN(args.input_size, args.hidden_size, args.output_size)
-    ffn = PureFFN(1024, 1024, 1024)
+    student = AutoModelForSeq2SeqLM.from_pretrained(args.student_path)
 
     tokenizer = AutoTokenizer.from_pretrained(args.student_path)
 
-    teacher, student, ffn = model_tocuda(teacher, student, ffn)
+    student = student.cuda()
 
-    trainer.model = {"student": student, "teacher": teacher, "ffn": ffn}
+    trainer.model = {"model": student}
     trainer.tokenizer = tokenizer
     # 获取数据集
-    data = load_from_disk(args.data_dir)
-    data = DatasetDict({"train":data}) if not isinstance(data, DatasetDict) else data
+    data = get_DatasetDict(data_dir=args.data_dir, src_lang=args.src_lang, tgt_lang=args.tgt_lang,
+                           src_file=args.src_file, tgt_file=args.tgt_file, denoising_file=args.denoising_file,
+                           denoising_langs=args.denoising_langs, steps=args.steps,
+                           tokenizer=tokenizer, max_length=args.max_length, batch_size=args.batch_size, bi=args.bi)
 
-    def train_steps_fn(model, x):
-        loss = None
-        return_metrics = dict()
-        outputs = translate_step(model["student"], x)
-        # outputs.pop("encoder_hidden_states")
+    def train_steps_fn(model):
+        step_outputs = []
+        if STEPS[0] in args.steps:
+            x = trainer.get_batch(STEPS[0], "train", trainer.shuffle)
+            translate_output = translate_step(model["model"], x, output_hidden_states = STEPS[2] in args.steps)
+            outputs = trainer.post_step(outputs=translate_output, labels=x["labels"])
+            step_outputs.append(outputs)
+        if STEPS[1] in args.steps:
+            for lang in args.denoising_langs:
+                x = trainer.get_batch(STEPS[1], lang, trainer.shuffle)
+                outputs = denoising_step(model["model"], x, lang, args.w_noise)
+                step_outputs.append(outputs)
+        if STEPS[2] in args.steps:
+            outputs = tsda_step(model["model"], translate_output, x, w=1)
+            step_outputs.append(outputs)
 
-        loss = outputs.loss
-        return_metrics["translate_loss"] = loss.item()
-        if len(args.steps) > 0:
-            mask = x["labels"] != -100
-            teacher_outputs = teacher_forward(model["teacher"], x, tokenizer.pad_token_id,
-                                              decoder_start_token_id=model["student"].config.decoder_start_token_id)
-            # teacher_outputs.pop("past_key_values")
-        if STEPS[1] in args.steps or STEPS[3] in args.steps:
-            distill_outputs = distill_enc_step(model["ffn"], teacher_outputs, outputs, x["attention_mask"], int(args.w_enc))
-            loss += distill_outputs.pop("loss").to(loss.device)
-            for k, v in distill_outputs.items():
-                return_metrics[k] = v
-        if STEPS[2] in args.steps or STEPS[3] in args.steps:
-            distill_outputs = distill_dec_step(model["ffn"], teacher_outputs, outputs, mask, int(args.w_dec))
-            loss += distill_outputs.pop("loss").to(loss.device)
-            for k, v in distill_outputs.items():
-                return_metrics[k] = v
-        if STEPS[4] in args.steps:
-            pass                            # 未完待续
+        return step_outputs
 
-        return loss, return_metrics
-
-    trainer.train(train_steps_fn, data, evaluate_fn=evaluate_both, shuffle=args.shuffle)
+    trainer.train(train_steps_fn, data, evaluate_fn=evaluate_, shuffle=args.shuffle)
     pass
 
 if __name__ == "__main__":
