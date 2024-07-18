@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 
 class In_trust_Loss(nn.Module):
+    """https://www.bilibili.com/video/BV1zj411K79W/?p=12&spm_id_from=333.1007.top_right_bar_window_history.content.click&vd_source=d4252d9fa1322a283dadf6d98aba4ac6"""
     def __init__(self, alpha=1, beta=0.8,delta=0.5, num_classes=35):
         super().__init__()
         self.alpha = alpha
